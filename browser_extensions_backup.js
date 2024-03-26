@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --ext=js -A
+
 const path =
   `${Deno.env.get("HOME")}/.config/BraveSoftware/Brave-Browser/Default/`;
 const extPath = path + "Extensions/";
