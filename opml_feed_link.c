@@ -2,7 +2,7 @@
  * `opml_feed_link`: It extracts link from opml file and prints it in output file.
  * Usage:
  *      opml_feed_link <opml_file> <output_file>
- * --------------------------------------------------------------------------------
+ * ------------------------------------------------------------------------------
  * MIT License
  *
  * Copyright 2024 AnzenKodo
