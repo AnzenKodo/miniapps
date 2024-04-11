@@ -2,6 +2,13 @@
  * `opml_feed_link`: It extracts link from opml file and prints it in output file.
  * Usage:
  *      opml_feed_link <opml_file> <output_file>
+ * Compile:
+ *      GCC: cc opml_feed_link.c -o opml_feed_link
+ *      Clang: cl opml_feed_link.c -o opml_feed_link
+ *      tcc: tcc opml_feed_link.c -o opml_feed_link
+ *      MSVC: cl opml_feed_link.c -O:opml_feed_link
+ * Run:
+ *      ./opml_feed_link <opml-filename>
  * ------------------------------------------------------------------------------
  * MIT License
  *
