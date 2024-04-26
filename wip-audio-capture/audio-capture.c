@@ -1,7 +1,6 @@
 #define MINIAUDIO_IMPLEMENTATION
 
 // #define MA_DEBUG_OUTPUT
-#define MA_NO_DECODING
 #define MA_NO_FLAC
 #define MA_NO_RESOURCE_MANAGER
 #define MA_NO_NODE_GRAPH
@@ -13,7 +12,7 @@
 #include "./miniaudio.h"
 
 #define PROJECT_NAME "audio-capture"
-#define PROJECT_VERSION "Version: 0.1\n"
+#define PROJECT_VERSION "Version: 0.1"
 
 const char *help_message = "A command line audio capture utility.\n\n"
 "Usage: "PROJECT_NAME" [OPTIONS] [FILE]\n"
@@ -21,8 +20,31 @@ const char *help_message = "A command line audio capture utility.\n\n"
 "   -s --show-devices       Show capture devices\n"
 "   -i --index              Capture from device index\n"
 "   -h --help               Print help\n"
-"   -v --version            Print version\n"
-PROJECT_VERSION;
+"   -v --version            Print version\n\n"
+PROJECT_VERSION
+" | SPDX-License-Identifier: MIT (https://spdx.org/licenses/MIT)\n";
+
+void count(void) {
+    unsigned int hour = 0;
+    unsigned int minute = 0;
+    unsigned int second = 0;
+
+    while(1) {
+        printf("\r%02d:%02d:%02d", hour, minute, second);
+        fflush(stdout);
+
+        second++;
+        if (second == 60) {
+           minute += 1;
+           second = 0;
+        }
+        if(minute == 60) {
+            hour += 1;
+            minute = 0;
+        }
+        sleep(1);
+    }
+}
 
 void audio_handle_err(ma_result result, char *str, ...) {
     if (result == MA_SUCCESS) return;
@@ -30,7 +52,7 @@ void audio_handle_err(ma_result result, char *str, ...) {
     fprintf(stderr, "Error: '%s' ", ma_result_description(result));
     va_list args;
     va_start(args, str);
-        fprintf(stderr, str, args);
+        fprintf(stderr, str, va_arg(args, char*));
     va_end(args);
     fprintf(stderr, "\n");
     exit(1);
@@ -49,7 +71,7 @@ void data_callback(
 
 void record(
     char *filename, ma_device_id *device_id,
-    unsigned int channels, unsigned int sample_rate
+    unsigned int channels, int sample_rate
 ) {
     ma_encoder_config encoderConfig;
     ma_encoder encoder;
@@ -63,7 +85,7 @@ void record(
         exit(1);
     }
 
-    if (sample_rate > 0) {
+    if (sample_rate <  0) {
         fprintf(
             stderr, "Error: sample-rate (which is %d) can't be negative.\n",
             sample_rate
@@ -76,10 +98,9 @@ void record(
     );
 
     audio_handle_err(
-        ma_encoder_init_file(
-            filename, &encoderConfig, &encoder),
-            "Failed to initialize output file: %s.", filename
-        );
+        ma_encoder_init_file(filename, &encoderConfig, &encoder),
+        "Failed to initialize output file `%s`.", filename
+    );
 
     ma_device_config config = ma_device_config_init(ma_device_type_capture);
     config.playback.pDeviceID = device_id;
@@ -96,8 +117,7 @@ void record(
 
     audio_handle_err(ma_device_start(&device), "Failed to start device.");
 
-    printf("Press Enter to stop recording...\n");
-    getchar();
+    count();
 
     ma_device_uninit(&device);
     ma_encoder_uninit(&encoder);
@@ -153,38 +173,33 @@ ma_device_id get_device_id(ma_uint32 device_index) {
 
 int main(int argc, char *argv[])
 {
-    ma_device_id device_id = get_device_id(0);;
-    unsigned int channels = 2;
-    unsigned int sample_rate = 44100;
-    if (argc < 2) {
-        printf(help_message);
-        return 0;
-    }
-
-    if (argv[1][0] == '-') {
-        if (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0) {
-            printf(help_message);
-        } else if (strcmp(argv[1], "-v") == 0 || strcmp(argv[1], "--version") == 0) {
-            printf(PROJECT_VERSION);
-        } else if (strcmp(argv[1], "-s") == 0 || strcmp(argv[1], "--show-devices") == 0) {
-            show_devices();
-        } else if (strcmp(argv[1], "-i") == 0 || strcmp(argv[1], "--index") == 0) {
-            device_id =  get_device_id(atoi(argv[2]));
-        } else if (strcmp(argv[1], "-c") == 0 || strcmp(argv[1], "--channels") == 0) {
-            channels = atoi(argv[2]);
-        } else if (strcmp(argv[1], "-r") == 0 || strcmp(argv[1], "--sample_rate") == 0) {
-            sample_rate = atoi(argv[2]);
-            printf("%d", sample_rate);
-        } else {
-            fprintf(stderr, "Error: unrecognized command-line option '%s'\n\n", argv[1]);
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             printf(help_message);
             return 0;
         }
+        if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--version") == 0) {
+            printf(PROJECT_VERSION);
+            puts("");
+            return 0;
+        }
+        if (strcmp(argv[i], "-s") == 0 || strcmp(argv[i], "--show-devices") == 0) {
+            show_devices();
+            return 0;
+        }
 
-        // record(argv[3], &device_id, channels, sample_rate);
-    } else {
-        printf("Recording audio...\n");
+        if (strcmp(argv[i], "-i") == 0 || strcmp(argv[i], "--index") == 0) {
+            device_id =  get_device_id(atoi(argv[i++]));
+        } else if (strcmp(argv[i], "-c") == 0 || strcmp(argv[i], "--channels") == 0) {
+            channels = atoi(argv[i++]);
+        } else if (strcmp(argv[i], "-r") == 0 || strcmp(argv[i], "--sampler-rate") == 0) {
+            sample_rate = atoi(argv[i++]);
+        } else {
+            filename = argv[i];
+        }
     }
+
+    record(filename, &device_id, channels, sample_rate);
 
     return 0;
 }
