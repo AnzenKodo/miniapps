@@ -173,6 +173,15 @@ ma_device_id get_device_id(ma_uint32 device_index) {
 
 int main(int argc, char *argv[])
 {
+    ma_device_id device_id = get_device_id(0);;
+    unsigned int channels = 2;
+    unsigned int sample_rate = 44100;
+    char *filename;
+    if (argc < 2) {
+        printf(help_message);
+        return 0;
+    }
+
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             printf(help_message);
