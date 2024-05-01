@@ -85,7 +85,7 @@ void record(
         exit(1);
     }
 
-    if (sample_rate <  0) {
+    if (sample_rate < 0) {
         fprintf(
             stderr, "Error: sample-rate (which is %d) can't be negative.\n",
             sample_rate

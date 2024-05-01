@@ -32,12 +32,13 @@ PROJECT_VERSION
 " | SPDX-License-Identifier: MIT (https://spdx.org/licenses/MIT)\n";
 
 //===============================================================================
-/*
+
+/*******************************************************************************
  * Following code is taken from https://github.com/zserge/beep by Serge Zaitsev
  * Some parts of the code is modified by me.
- */
-
-/*
+ *
+ *-------------------------------------------------------------------------------
+ *
  * The MIT License (MIT)
  *
  * Copyright (c) 2020 Serge Zaitsev
@@ -59,7 +60,7 @@ PROJECT_VERSION
  * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
- */
+ *******************************************************************************/
 
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
 /* On Windows use the built-in Beep() function from <utilapiset.h> */
