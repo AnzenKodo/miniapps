@@ -1,9 +1,6 @@
 /********************************************************************************
- * Compile:
+ Compile:
  *      GCC:    cc ctimer.c -lasound -o ctimer
- *      Clang:  cl ctimer.c -lasound -o ctimer
- *      tcc:    tcc ctimer.c -lasound -o ctimer
- *      MSVC:   cl ctimer.c -O:ctimer
 ********************************************************************************/
 
 #include <stdio.h>
@@ -24,8 +21,8 @@ const char *help_message = "Timer and Stopwatch writtern in C.\n\n"
 "Example:\n"
 "   "PROJECT_NAME" 1h 5m 30s\n"
 "Options:\n"
-"   -d --d-beep             Duration of beep for Timer in seconds (default: 1)"
-"   -n --no-beep            Disable beep for Timer"
+"   -d --d-beep             Duration of beep for Timer in seconds (default: 1)\n"
+"   -n --no-beep            Disable beep for Timer\n"
 "   -h --help               Print help\n"
 "   -v --version            Print version\n\n"
 PROJECT_VERSION
@@ -234,9 +231,9 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    max_time = max_hour + max_minute + max_second;
+    max_time = (max_hour*60*60) + (max_minute*60) + max_second;
     while(1) {
-        time = hour + minute + second;
+        time = (hour*60*60) + (minute*60) + second;
 
         if (max_time == 0) {
             printf("\rStopwatch: %02d:%02d:%02d", hour, minute, second);
