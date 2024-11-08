@@ -43,13 +43,13 @@
 int main(int argc, char *argv[]) {
     FILE *output_file = fopen(argv[2], "r+");
     if (output_file == NULL) {
-        perror("Error opening output file.");
+        perror("Error: couldn't opening output file.");
         return 1;
     }
 
     FILE *temp_file = tmpfile();
     if (temp_file == NULL) {
-        perror("Error opening temp file.");
+        perror("Error: couldn't opening temp file.");
         return 1;
     }
 
@@ -67,7 +67,7 @@ int main(int argc, char *argv[]) {
 
     FILE *opml_file = fopen(argv[1], "r");
     if (opml_file == NULL) {
-        perror("Error opening opml file.");
+        perror("Error: couldn't opening opml file.");
         return 1;
     }
 
@@ -90,6 +90,7 @@ int main(int argc, char *argv[]) {
     }
 
     rewind(temp_file);
+    rewind(output_file);
     while (fgets(line, MAX_LINE_LENGTH, temp_file)) {
         fprintf(output_file, line);
     }
