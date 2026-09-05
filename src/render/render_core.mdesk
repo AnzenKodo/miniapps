@@ -1,0 +1,109 @@
+// ak: Tables
+//=============================================================================
+
+@table(name, display_string, bytes_per_pixel)
+Render_Tex_2D_Format_Table:
+{
+    { R8       "R8"       1 }
+    { RG8      "RG8"      2 }
+    { RGBA8    "RGBA8"    4 }
+    { BGRA8    "BGRA8"    4 }
+    { R16      "R16"      2 }
+    { RGBA16   "RGBA16"   8 }
+    { R32      "R32"      4 }
+    { RG32     "RG32"     8 }
+    { RGBA32   "RGBA32"  16 }
+}
+
+@table(name, display_string)
+Render_Resource_Kind_Table:
+{
+    // NOTE(ak): static resource is immutable initial data must be provided at
+    // creation time GPU can read the resource CPU is not allowed to read or
+    // write
+    { Static   "Static" }
+    
+    // NOTE(ak): dynamic resource allows resource to be modified GPU can read &
+    // write to it CPU can write to it using UpdateSubresource
+    { Dynamic  "Dynamic" }
+    
+    // NOTE(ak): stream resource will be often updated fully overwriting
+    // previous data GPU can only read it CPU can update via
+    // Map (with WRITE_DISCARD flag) + Unmap
+    { Stream   "Stream" }
+}
+
+@table(name, display_string)
+Render_Tex_2D_Sample_Kind_Table:
+{
+    { Nearest   "Nearest" }
+    { Linear    "Linear"  }
+}
+
+@table(name, batch, display_string)
+Render_Pass_Kind_Table:
+{
+    { UI 1 "UI" }
+}
+
+// ak: Generators
+//=============================================================================
+
+@enum Render_Tex_2D_Format:
+{
+    @expand(Render_Tex_2D_Format_Table a) `$(a.name)`,
+    COUNT,
+}
+
+@enum Render_Resource_Kind:
+{
+    @expand(Render_Resource_Kind_Table a) `$(a.name)`,
+    COUNT,
+}
+
+@enum Render_Tex_2D_Sample_Kind:
+{
+    @expand(Render_Tex_2D_Sample_Kind_Table a) `$(a.name)`,
+    COUNT,
+}
+
+@enum Render_Pass_Kind:
+{
+    @expand(Render_Pass_Kind_Table a) `$(a.name)`,
+    COUNT,
+}
+
+@data(Str8) _render_tex2d_format_display_string_table:
+{
+    @expand(Render_Tex_2D_Format_Table a) `str8("$(a.display_string)")`;
+}
+
+@data(uint8_t) _render_tex2d_format_bytes_per_pixel_table:
+{
+    @expand(Render_Tex_2D_Format_Table a) `$(a.bytes_per_pixel)`;
+}
+
+@data(Str8) _render_resource_kind_display_string_table:
+{
+    @expand(Render_Resource_Kind_Table a) `str8("$(a.display_string)")`;
+}
+
+@data(Str8) _render_tex2d_sample_kind_display_string_table:
+{
+    @expand(Render_Tex_2D_Sample_Kind_Table a) `str8("$(a.display_string)")`;
+}
+
+@data(Str8) _render_pass_kind_display_string_table:
+{
+    @expand(Render_Pass_Kind_Table a) `str8("$(a.display_string)")`;
+}
+
+@data(uint8_t) _render_pass_kind_batch_table:
+{
+    @expand(Render_Pass_Kind_Table a) `$(a.batch)`;
+}
+
+@data(uint64_t) @c_file _render_pass_kind_params_size_table:
+{
+    @expand(Render_Pass_Kind_Table a) `sizeof(Render_Pass_Params_$(a.name))`;
+}
