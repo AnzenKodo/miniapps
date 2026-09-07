@@ -31,10 +31,6 @@ struct _Audio_Sound
     _Audio_Sound     *next;
     void             *data;
     size_t           size;
-    float            *pcm_data;
-    uint64_t         total_frames;
-    uint32_t         channels;
-    uint32_t         sample_rate;
     Audio_Load_Flags flags;
     bool             in_use;
 };
@@ -77,14 +73,8 @@ struct _Audio_Voice
     Audio_Handle       audio;
     _Audio_Voice_State state;
     Audio_Play_Params  params;
-    uint64_t           current_frame;
-    uint64_t           total_frames;
-    float             *pcm_data;
-    uint32_t           channels;
-    uint32_t           sample_rate;
     ma_decoder         decoder;
     bool               decoder_valid;
-    bool               is_pcm;
 };
 
 // ak: State

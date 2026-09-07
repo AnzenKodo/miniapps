@@ -51,42 +51,47 @@ internal void _audio_callback(ma_device* device, void* output, const void* input
     {
         _Audio_Voice *next_voice = voice->next;
         
-        if(voice->state == _Audio_Voice_State_Playing)
+        if(voice->state == _Audio_Voice_State_Playing && voice->decoder_valid)
         {
+            #define MIX_BUFFER_SIZE 1024
+            float mix_buf[MIX_BUFFER_SIZE * 8];
+            
             uint32_t out_channels = channels;
             if (out_channels > 8) out_channels = 8;
             
-            float volume = voice->params.volume;
-            float left_gain = volume;
-            float right_gain = volume;
-            if(out_channels == 2)
+            ma_uint32 frames_mixed = 0;
+            while(frames_mixed < frame_count)
             {
-                float pan = voice->params.pan;
-                if(pan < 0.f)
+                ma_uint32 chunk_frames = frame_count - frames_mixed;
+                if(chunk_frames > MIX_BUFFER_SIZE)
                 {
-                    right_gain *= (1.f + pan);
-                }
-                else if(pan > 0.f)
-                {
-                    left_gain *= (1.f - pan);
-                }
-            }
-            
-            if (voice->is_pcm && voice->pcm_data != NULL)
-            {
-                ma_uint32 frames_to_mix = frame_count;
-                if (voice->current_frame + frames_to_mix > voice->total_frames)
-                {
-                    frames_to_mix = (voice->total_frames > voice->current_frame)
-                        ? (ma_uint32)(voice->total_frames - voice->current_frame) : 0;
+                    chunk_frames = MIX_BUFFER_SIZE;
                 }
                 
-                float *src = voice->pcm_data + (voice->current_frame * voice->channels);
-                for(ma_uint32 i = 0; i < frames_to_mix; i++)
+                ma_uint64 frames_read = 0;
+                ma_result result = ma_decoder_read_pcm_frames(&voice->decoder, mix_buf, chunk_frames, &frames_read);
+                
+                float volume = voice->params.volume;
+                float left_gain = volume;
+                float right_gain = volume;
+                if(out_channels == 2)
+                {
+                    float pan = voice->params.pan;
+                    if(pan < 0.f)
+                    {
+                        right_gain *= (1.f + pan);
+                    }
+                    else if(pan > 0.f)
+                    {
+                        left_gain *= (1.f - pan);
+                    }
+                }
+                
+                for(ma_uint32 i = 0; i < frames_read; i++)
                 {
                     for(uint32_t c = 0; c < out_channels; c++)
                     {
-                        float sample = src[i * voice->channels + c];
+                        float sample = mix_buf[i * out_channels + c];
                         if(out_channels == 2)
                         {
                             sample *= (c == 0) ? left_gain : right_gain;
@@ -95,74 +100,26 @@ internal void _audio_callback(ma_device* device, void* output, const void* input
                         {
                             sample *= volume;
                         }
-                        out_buf[i * channels + c] += sample;
+                        out_buf[(frames_mixed + i) * channels + c] += sample;
                     }
                 }
                 
-                voice->current_frame += frames_to_mix;
+                frames_mixed += (ma_uint32)frames_read;
                 
-                if(voice->current_frame >= voice->total_frames)
+                if(result != MA_SUCCESS || frames_read < chunk_frames)
                 {
                     if(voice->params.flags & Audio_Play_Flag_Loop)
                     {
-                        voice->current_frame = 0;
+                        ma_decoder_seek_to_pcm_frame(&voice->decoder, 0);
                     }
                     else
                     {
                         voice->state = _Audio_Voice_State_Finished;
+                        break;
                     }
                 }
             }
-            else if(voice->decoder_valid)
-            {
-                #define MIX_BUFFER_SIZE 1024
-                float mix_buf[MIX_BUFFER_SIZE * 8];
-                
-                ma_uint32 frames_mixed = 0;
-                while(frames_mixed < frame_count)
-                {
-                    ma_uint32 chunk_frames = frame_count - frames_mixed;
-                    if(chunk_frames > MIX_BUFFER_SIZE)
-                    {
-                        chunk_frames = MIX_BUFFER_SIZE;
-                    }
-                    
-                    ma_uint64 frames_read = 0;
-                    ma_result result = ma_decoder_read_pcm_frames(&voice->decoder, mix_buf, chunk_frames, &frames_read);
-                    
-                    for(ma_uint32 i = 0; i < frames_read; i++)
-                    {
-                        for(uint32_t c = 0; c < out_channels; c++)
-                        {
-                            float sample = mix_buf[i * out_channels + c];
-                            if(out_channels == 2)
-                            {
-                                sample *= (c == 0) ? left_gain : right_gain;
-                            }
-                            else
-                            {
-                                sample *= volume;
-                            }
-                            out_buf[(frames_mixed + i) * channels + c] += sample;
-                        }
-                    }
-                    
-                    frames_mixed += (ma_uint32)frames_read;
-                    
-                    if(result != MA_SUCCESS || frames_read < chunk_frames)
-                    {
-                        if(voice->params.flags & Audio_Play_Flag_Loop)
-                        {
-                            ma_decoder_seek_to_pcm_frame(&voice->decoder, 0);
-                        }
-                        else
-                        {
-                            voice->state = _Audio_Voice_State_Finished;
-                            break;
-                        }
-                    }
-                }
-            }
+            #undef MIX_BUFFER_SIZE
         }
         
         if(voice->state == _Audio_Voice_State_Finished)
@@ -173,8 +130,6 @@ internal void _audio_callback(ma_device* device, void* output, const void* input
                 ma_decoder_uninit(&voice->decoder);
                 voice->decoder_valid = false;
             }
-            voice->is_pcm = false;
-            voice->pcm_data = NULL;
             voice->state = _Audio_Voice_State_Inactive;
             SLLStackPush(_audio_state->free_voice, voice);
         }
@@ -286,31 +241,10 @@ internal Audio_Handle audio_load_from_memory(void *data, size_t size, Audio_Load
     }
     
     // ak: fill sound data
-    sound->in_use       = true;
-    sound->data         = data;
-    sound->size         = size;
-    sound->flags        = flags;
-    sound->pcm_data     = NULL;
-    sound->total_frames = 0;
-    sound->channels     = _audio_state->decoder.channels;
-    sound->sample_rate  = _audio_state->decoder.sample_rate;
-    
-    if (!(flags & Audio_Load_Flag_Stream))
-    {
-        ma_decoder_config config = ma_decoder_config_init(
-            _audio_state->decoder.format,
-            _audio_state->decoder.channels,
-            _audio_state->decoder.sample_rate
-        );
-        ma_uint64 frame_count = 0;
-        void *pcm_frames = NULL;
-        ma_result decode_res = ma_decode_memory(data, size, &config, &frame_count, &pcm_frames);
-        if (decode_res == MA_SUCCESS)
-        {
-            sound->pcm_data     = (float *)pcm_frames;
-            sound->total_frames = frame_count;
-        }
-    }
+    sound->in_use = true;
+    sound->data   = data;
+    sound->size   = size;
+    sound->flags  = flags;
     
     // ak: bundle & return
     Audio_Handle result = _audio_handle_from_sound(sound);
@@ -344,8 +278,6 @@ internal void audio_unload(Audio_Handle handle)
                     ma_decoder_uninit(&voice->decoder);
                     voice->decoder_valid = false;
                 }
-                voice->is_pcm = false;
-                voice->pcm_data = NULL;
                 voice->state = _Audio_Voice_State_Inactive;
                 SLLStackPush(_audio_state->free_voice, voice);
             }
@@ -355,12 +287,6 @@ internal void audio_unload(Audio_Handle handle)
         sound->in_use = false;
         sound->data = NULL;
         sound->size = 0;
-        if (sound->pcm_data != NULL)
-        {
-            ma_free(sound->pcm_data, NULL);
-            sound->pcm_data = NULL;
-        }
-        sound->total_frames = 0;
         SLLStackPush(_audio_state->free_sound, sound);
         ma_mutex_unlock(&_audio_state->mutex);
     }
@@ -387,39 +313,23 @@ internal Audio_Handle audio_play(Audio_Handle audio, Audio_Play_Params params)
         voice = arena_push(_audio_state->arena, _Audio_Voice, 1);
     }
     
-    voice->audio         = audio;
-    voice->params        = params;
-    voice->state         = (params.flags & Audio_Play_Flag_StartPaused)
-        ? _Audio_Voice_State_Paused : _Audio_Voice_State_Playing;
-    voice->current_frame = 0;
-    
-    if (sound->pcm_data != NULL)
+    ma_decoder_config config = ma_decoder_config_init(ma_format_f32, _audio_state->decoder.channels, _audio_state->decoder.sample_rate);
+    ma_result decode_result = ma_decoder_init_memory(sound->data, sound->size, &config, &voice->decoder);
+    if(decode_result == MA_SUCCESS)
     {
-        voice->is_pcm        = true;
-        voice->pcm_data      = sound->pcm_data;
-        voice->total_frames  = sound->total_frames;
-        voice->channels      = sound->channels;
-        voice->sample_rate   = sound->sample_rate;
-        voice->decoder_valid = false;
+        voice->decoder_valid = true;
+        voice->audio        = audio;
+        voice->params       = params;
+        voice->state        = (params.flags & Audio_Play_Flag_StartPaused)
+            ? _Audio_Voice_State_Paused : _Audio_Voice_State_Playing;
+            
         DLLPushBack(_audio_state->active_voices_first, _audio_state->active_voices_last, voice);
     }
     else
     {
-        voice->is_pcm = false;
-        voice->pcm_data = NULL;
-        ma_decoder_config config = ma_decoder_config_init(ma_format_f32, _audio_state->decoder.channels, _audio_state->decoder.sample_rate);
-        ma_result decode_result = ma_decoder_init_memory(sound->data, sound->size, &config, &voice->decoder);
-        if(decode_result == MA_SUCCESS)
-        {
-            voice->decoder_valid = true;
-            DLLPushBack(_audio_state->active_voices_first, _audio_state->active_voices_last, voice);
-        }
-        else
-        {
-            voice->decoder_valid = false;
-            SLLStackPush(_audio_state->free_voice, voice);
-            voice = NULL;
-        }
+        voice->decoder_valid = false;
+        SLLStackPush(_audio_state->free_voice, voice);
+        voice = NULL;
     }
     
     ma_mutex_unlock(&_audio_state->mutex);
@@ -442,7 +352,7 @@ internal bool audio_voice_is_alive(Audio_Handle voice_handle)
     {
         if (v == target)
         {
-            found = (v->state != _Audio_Voice_State_Inactive && (v->is_pcm || v->decoder_valid));
+            found = (v->state != _Audio_Voice_State_Inactive && v->decoder_valid);
             break;
         }
     }
@@ -607,25 +517,15 @@ internal double audio_voice_get_position_seconds(Audio_Handle voice_handle)
     double pos = 0.0;
     for (_Audio_Voice *v = _audio_state->active_voices_first; v != 0; v = v->next)
     {
-        if (v == target)
+        if (v == target && v->decoder_valid)
         {
-            if (v->is_pcm)
+            ma_uint64 cursor = 0;
+            if (ma_decoder_get_cursor_in_pcm_frames(&v->decoder, &cursor) == MA_SUCCESS)
             {
-                if (v->sample_rate > 0)
+                ma_uint32 sample_rate = v->decoder.outputSampleRate ? v->decoder.outputSampleRate : _audio_state->decoder.sample_rate;
+                if (sample_rate > 0)
                 {
-                    pos = (double)v->current_frame / (double)v->sample_rate;
-                }
-            }
-            else if (v->decoder_valid)
-            {
-                ma_uint64 cursor = 0;
-                if (ma_decoder_get_cursor_in_pcm_frames(&v->decoder, &cursor) == MA_SUCCESS)
-                {
-                    ma_uint32 sample_rate = v->decoder.outputSampleRate ? v->decoder.outputSampleRate : _audio_state->decoder.sample_rate;
-                    if (sample_rate > 0)
-                    {
-                        pos = (double)cursor / (double)sample_rate;
-                    }
+                    pos = (double)cursor / (double)sample_rate;
                 }
             }
             break;
@@ -645,25 +545,15 @@ internal double audio_voice_get_duration_seconds(Audio_Handle voice_handle)
     double dur = 0.0;
     for (_Audio_Voice *v = _audio_state->active_voices_first; v != 0; v = v->next)
     {
-        if (v == target)
+        if (v == target && v->decoder_valid)
         {
-            if (v->is_pcm)
+            ma_uint64 length = 0;
+            if (ma_decoder_get_length_in_pcm_frames(&v->decoder, &length) == MA_SUCCESS)
             {
-                if (v->sample_rate > 0)
+                ma_uint32 sample_rate = v->decoder.outputSampleRate ? v->decoder.outputSampleRate : _audio_state->decoder.sample_rate;
+                if (sample_rate > 0)
                 {
-                    dur = (double)v->total_frames / (double)v->sample_rate;
-                }
-            }
-            else if (v->decoder_valid)
-            {
-                ma_uint64 length = 0;
-                if (ma_decoder_get_length_in_pcm_frames(&v->decoder, &length) == MA_SUCCESS)
-                {
-                    ma_uint32 sample_rate = v->decoder.outputSampleRate ? v->decoder.outputSampleRate : _audio_state->decoder.sample_rate;
-                    if (sample_rate > 0)
-                    {
-                        dur = (double)length / (double)sample_rate;
-                    }
+                    dur = (double)length / (double)sample_rate;
                 }
             }
             break;
@@ -683,34 +573,21 @@ internal bool audio_voice_seek_seconds(Audio_Handle voice_handle, double seconds
     bool success = false;
     for (_Audio_Voice *v = _audio_state->active_voices_first; v != 0; v = v->next)
     {
-        if (v == target)
+        if (v == target && v->decoder_valid)
         {
+            ma_uint32 sample_rate = v->decoder.outputSampleRate ? v->decoder.outputSampleRate : _audio_state->decoder.sample_rate;
+            ma_uint64 total_frames = 0;
+            ma_decoder_get_length_in_pcm_frames(&v->decoder, &total_frames);
+            
             if (seconds < 0.0) seconds = 0.0;
-            if (v->is_pcm)
+            ma_uint64 target_frame = (ma_uint64)(seconds * (double)sample_rate);
+            if (total_frames > 0 && target_frame >= total_frames)
             {
-                uint64_t target_frame = (uint64_t)(seconds * (double)v->sample_rate);
-                if (target_frame > v->total_frames)
-                {
-                    target_frame = v->total_frames;
-                }
-                v->current_frame = target_frame;
-                success = true;
+                target_frame = (total_frames > 0) ? total_frames - 1 : 0;
             }
-            else if (v->decoder_valid)
-            {
-                ma_uint32 sample_rate = v->decoder.outputSampleRate ? v->decoder.outputSampleRate : _audio_state->decoder.sample_rate;
-                ma_uint64 total_frames = 0;
-                ma_decoder_get_length_in_pcm_frames(&v->decoder, &total_frames);
-                
-                ma_uint64 target_frame = (ma_uint64)(seconds * (double)sample_rate);
-                if (total_frames > 0 && target_frame >= total_frames)
-                {
-                    target_frame = (total_frames > 0) ? total_frames - 1 : 0;
-                }
-                
-                ma_result res = ma_decoder_seek_to_pcm_frame(&v->decoder, target_frame);
-                success = (res == MA_SUCCESS);
-            }
+            
+            ma_result res = ma_decoder_seek_to_pcm_frame(&v->decoder, target_frame);
+            success = (res == MA_SUCCESS);
             break;
         }
     }
@@ -727,22 +604,13 @@ internal void audio_voice_restart(Audio_Handle voice_handle)
     ma_mutex_lock(&_audio_state->mutex);
     for (_Audio_Voice *v = _audio_state->active_voices_first; v != 0; v = v->next)
     {
-        if (v == target)
+        if (v == target && v->decoder_valid)
         {
-            if (v->is_pcm)
-            {
-                v->current_frame = 0;
-                v->state = _Audio_Voice_State_Playing;
-            }
-            else if (v->decoder_valid)
-            {
-                ma_decoder_seek_to_pcm_frame(&v->decoder, 0);
-                v->state = _Audio_Voice_State_Playing;
-            }
+            ma_decoder_seek_to_pcm_frame(&v->decoder, 0);
+            v->state = _Audio_Voice_State_Playing;
             break;
         }
     }
     ma_mutex_unlock(&_audio_state->mutex);
 }
-
 
