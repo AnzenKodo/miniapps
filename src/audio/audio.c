@@ -507,6 +507,123 @@ internal float audio_voice_get_volume(Audio_Handle voice_handle)
     return vol;
 }
 
+internal void audio_voice_set_pitch(Audio_Handle voice_handle, float pitch)
+{
+    if (_audio_state == 0) { return; }
+    _Audio_Voice *target = _audio_voice_from_handle(voice_handle);
+    if (target == 0) { return; }
+    if (pitch < 0.0f) pitch = 0.0f;
+    
+    ma_mutex_lock(&_audio_state->mutex);
+    for (_Audio_Voice *v = _audio_state->active_voices_first; v != 0; v = v->next)
+    {
+        if (v == target)
+        {
+            v->params.pitch = pitch;
+            break;
+        }
+    }
+    ma_mutex_unlock(&_audio_state->mutex);
+}
+
+internal float audio_voice_get_pitch(Audio_Handle voice_handle)
+{
+    if (_audio_state == 0) { return 1.0f; }
+    _Audio_Voice *target = _audio_voice_from_handle(voice_handle);
+    if (target == 0) { return 1.0f; }
+    
+    ma_mutex_lock(&_audio_state->mutex);
+    float pitch = 1.0f;
+    for (_Audio_Voice *v = _audio_state->active_voices_first; v != 0; v = v->next)
+    {
+        if (v == target)
+        {
+            pitch = v->params.pitch;
+            break;
+        }
+    }
+    ma_mutex_unlock(&_audio_state->mutex);
+    return pitch;
+}
+
+internal void audio_voice_set_pan(Audio_Handle voice_handle, float pan)
+{
+    if (_audio_state == 0) { return; }
+    _Audio_Voice *target = _audio_voice_from_handle(voice_handle);
+    if (target == 0) { return; }
+    if (pan < -1.0f) pan = -1.0f;
+    if (pan > 1.0f)  pan = 1.0f;
+    
+    ma_mutex_lock(&_audio_state->mutex);
+    for (_Audio_Voice *v = _audio_state->active_voices_first; v != 0; v = v->next)
+    {
+        if (v == target)
+        {
+            v->params.pan = pan;
+            break;
+        }
+    }
+    ma_mutex_unlock(&_audio_state->mutex);
+}
+
+internal float audio_voice_get_pan(Audio_Handle voice_handle)
+{
+    if (_audio_state == 0) { return 0.0f; }
+    _Audio_Voice *target = _audio_voice_from_handle(voice_handle);
+    if (target == 0) { return 0.0f; }
+    
+    ma_mutex_lock(&_audio_state->mutex);
+    float pan = 0.0f;
+    for (_Audio_Voice *v = _audio_state->active_voices_first; v != 0; v = v->next)
+    {
+        if (v == target)
+        {
+            pan = v->params.pan;
+            break;
+        }
+    }
+    ma_mutex_unlock(&_audio_state->mutex);
+    return pan;
+}
+
+internal void audio_voice_set_bus(Audio_Handle voice_handle, uint32_t bus)
+{
+    if (_audio_state == 0) { return; }
+    _Audio_Voice *target = _audio_voice_from_handle(voice_handle);
+    if (target == 0) { return; }
+    
+    ma_mutex_lock(&_audio_state->mutex);
+    for (_Audio_Voice *v = _audio_state->active_voices_first; v != 0; v = v->next)
+    {
+        if (v == target)
+        {
+            v->params.bus = bus;
+            break;
+        }
+    }
+    ma_mutex_unlock(&_audio_state->mutex);
+}
+
+internal uint32_t audio_voice_get_bus(Audio_Handle voice_handle)
+{
+    if (_audio_state == 0) { return 0; }
+    _Audio_Voice *target = _audio_voice_from_handle(voice_handle);
+    if (target == 0) { return 0; }
+    
+    ma_mutex_lock(&_audio_state->mutex);
+    uint32_t bus = 0;
+    for (_Audio_Voice *v = _audio_state->active_voices_first; v != 0; v = v->next)
+    {
+        if (v == target)
+        {
+            bus = v->params.bus;
+            break;
+        }
+    }
+    ma_mutex_unlock(&_audio_state->mutex);
+    return bus;
+}
+
 internal double audio_voice_get_position_seconds(Audio_Handle voice_handle)
 {
     if (_audio_state == 0) { return 0.0; }
