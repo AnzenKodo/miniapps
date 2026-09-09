@@ -53,73 +53,88 @@ internal void _audio_callback(ma_device* device, void* output, const void* input
         
         if(voice->state == _Audio_Voice_State_Playing && voice->decoder_valid)
         {
-            #define MIX_BUFFER_SIZE 1024
-            float mix_buf[MIX_BUFFER_SIZE * 8];
-            
-            uint32_t out_channels = channels;
-            if (out_channels > 8) out_channels = 8;
-            
-            ma_uint32 frames_mixed = 0;
-            while(frames_mixed < frame_count)
+            uint32_t bus_idx = voice->params.bus;
+            if(bus_idx >= AUDIO_MAX_BUSES)
             {
-                ma_uint32 chunk_frames = frame_count - frames_mixed;
-                if(chunk_frames > MIX_BUFFER_SIZE)
-                {
-                    chunk_frames = MIX_BUFFER_SIZE;
-                }
+                bus_idx = 0;
+            }
+            _Audio_Bus *bus = &_audio_state->buses[bus_idx];
+            
+            if(!bus->paused)
+            {
+                #define MIX_BUFFER_SIZE 1024
+                float mix_buf[MIX_BUFFER_SIZE * 8];
                 
-                ma_uint64 frames_read = 0;
-                ma_result result = ma_decoder_read_pcm_frames(&voice->decoder, mix_buf, chunk_frames, &frames_read);
+                uint32_t out_channels = channels;
+                if (out_channels > 8) out_channels = 8;
                 
-                float volume = voice->params.volume;
-                float left_gain = volume;
-                float right_gain = volume;
-                if(out_channels == 2)
+                ma_uint32 frames_mixed = 0;
+                while(frames_mixed < frame_count)
                 {
-                    float pan = voice->params.pan;
-                    if(pan < 0.f)
+                    ma_uint32 chunk_frames = frame_count - frames_mixed;
+                    if(chunk_frames > MIX_BUFFER_SIZE)
                     {
-                        right_gain *= (1.f + pan);
+                        chunk_frames = MIX_BUFFER_SIZE;
                     }
-                    else if(pan > 0.f)
+                    
+                    ma_uint64 frames_read = 0;
+                    ma_result result = ma_decoder_read_pcm_frames(&voice->decoder, mix_buf, chunk_frames, &frames_read);
+                    
+                    float volume = voice->params.volume * bus->volume;
+                    if(volume < 0.f) volume = 0.f;
+                    
+                    float left_gain = volume;
+                    float right_gain = volume;
+                    if(out_channels == 2)
                     {
-                        left_gain *= (1.f - pan);
-                    }
-                }
-                
-                for(ma_uint32 i = 0; i < frames_read; i++)
-                {
-                    for(uint32_t c = 0; c < out_channels; c++)
-                    {
-                        float sample = mix_buf[i * out_channels + c];
-                        if(out_channels == 2)
+                        float pan = voice->params.pan + bus->pan;
+                        if(pan < -1.f) pan = -1.f;
+                        if(pan > 1.f)  pan = 1.f;
+                        
+                        if(pan < 0.f)
                         {
-                            sample *= (c == 0) ? left_gain : right_gain;
+                            right_gain *= (1.f + pan);
+                        }
+                        else if(pan > 0.f)
+                        {
+                            left_gain *= (1.f - pan);
+                        }
+                    }
+                    
+                    for(ma_uint32 i = 0; i < frames_read; i++)
+                    {
+                        for(uint32_t c = 0; c < out_channels; c++)
+                        {
+                            float sample = mix_buf[i * out_channels + c];
+                            if(out_channels == 2)
+                            {
+                                sample *= (c == 0) ? left_gain : right_gain;
+                            }
+                            else
+                            {
+                                sample *= volume;
+                            }
+                            out_buf[(frames_mixed + i) * channels + c] += sample;
+                        }
+                    }
+                    
+                    frames_mixed += (ma_uint32)frames_read;
+                    
+                    if(result != MA_SUCCESS || frames_read < chunk_frames)
+                    {
+                        if(voice->params.flags & Audio_Play_Flag_Loop)
+                        {
+                            ma_decoder_seek_to_pcm_frame(&voice->decoder, 0);
                         }
                         else
                         {
-                            sample *= volume;
+                            voice->state = _Audio_Voice_State_Finished;
+                            break;
                         }
-                        out_buf[(frames_mixed + i) * channels + c] += sample;
                     }
                 }
-                
-                frames_mixed += (ma_uint32)frames_read;
-                
-                if(result != MA_SUCCESS || frames_read < chunk_frames)
-                {
-                    if(voice->params.flags & Audio_Play_Flag_Loop)
-                    {
-                        ma_decoder_seek_to_pcm_frame(&voice->decoder, 0);
-                    }
-                    else
-                    {
-                        voice->state = _Audio_Voice_State_Finished;
-                        break;
-                    }
-                }
+                #undef MIX_BUFFER_SIZE
             }
-            #undef MIX_BUFFER_SIZE
         }
         
         if(voice->state == _Audio_Voice_State_Finished)
@@ -170,6 +185,15 @@ internal bool audio_init(uint32_t sample_rate, uint32_t channel_count)
     _audio_state->decoder.format = ma_format_f32;
     _audio_state->decoder.channels = channel_count;
     _audio_state->decoder.sample_rate = sample_rate;
+    
+    // ak: initialize buses
+    for(uint32_t i = 0; i < AUDIO_MAX_BUSES; i++)
+    {
+        _audio_state->buses[i].volume = 1.0f;
+        _audio_state->buses[i].pitch  = 1.0f;
+        _audio_state->buses[i].pan    = 0.0f;
+        _audio_state->buses[i].paused = false;
+    }
     
     // ak: initialize device config
     ma_device_config config  = ma_device_config_init(ma_device_type_playback);
@@ -300,6 +324,11 @@ internal Audio_Handle audio_play(Audio_Handle audio, Audio_Play_Params params)
     if (_audio_state == 0) { return audio_handle_zero(); }
     _Audio_Sound *sound = _audio_sound_from_handle(audio);
     if(sound == 0 || !sound->in_use) { return audio_handle_zero(); }
+    
+    if (params.bus >= AUDIO_MAX_BUSES)
+    {
+        params.bus = 0;
+    }
     
     ma_mutex_lock(&_audio_state->mutex);
     
@@ -588,7 +617,7 @@ internal float audio_voice_get_pan(Audio_Handle voice_handle)
 
 internal void audio_voice_set_bus(Audio_Handle voice_handle, uint32_t bus)
 {
-    if (_audio_state == 0) { return; }
+    if (_audio_state == 0 || bus >= AUDIO_MAX_BUSES) { return; }
     _Audio_Voice *target = _audio_voice_from_handle(voice_handle);
     if (target == 0) { return; }
     
@@ -730,4 +759,147 @@ internal void audio_voice_restart(Audio_Handle voice_handle)
     }
     ma_mutex_unlock(&_audio_state->mutex);
 }
+
+// ak: Bus Controls
+//=============================================================================
+
+internal void audio_bus_set_volume(uint32_t bus, float volume)
+{
+    if (_audio_state == 0 || bus >= AUDIO_MAX_BUSES) { return; }
+    if (volume < 0.0f) volume = 0.0f;
+    
+    ma_mutex_lock(&_audio_state->mutex);
+    _audio_state->buses[bus].volume = volume;
+    ma_mutex_unlock(&_audio_state->mutex);
+}
+
+internal float audio_bus_get_volume(uint32_t bus)
+{
+    if (_audio_state == 0 || bus >= AUDIO_MAX_BUSES) { return 0.0f; }
+    
+    ma_mutex_lock(&_audio_state->mutex);
+    float vol = _audio_state->buses[bus].volume;
+    ma_mutex_unlock(&_audio_state->mutex);
+    return vol;
+}
+
+internal void audio_bus_set_pitch(uint32_t bus, float pitch)
+{
+    if (_audio_state == 0 || bus >= AUDIO_MAX_BUSES) { return; }
+    if (pitch < 0.0f) pitch = 0.0f;
+    
+    ma_mutex_lock(&_audio_state->mutex);
+    _audio_state->buses[bus].pitch = pitch;
+    ma_mutex_unlock(&_audio_state->mutex);
+}
+
+internal float audio_bus_get_pitch(uint32_t bus)
+{
+    if (_audio_state == 0 || bus >= AUDIO_MAX_BUSES) { return 1.0f; }
+    
+    ma_mutex_lock(&_audio_state->mutex);
+    float pitch = _audio_state->buses[bus].pitch;
+    ma_mutex_unlock(&_audio_state->mutex);
+    return pitch;
+}
+
+internal void audio_bus_set_pan(uint32_t bus, float pan)
+{
+    if (_audio_state == 0 || bus >= AUDIO_MAX_BUSES) { return; }
+    if (pan < -1.0f) pan = -1.0f;
+    if (pan > 1.0f)  pan = 1.0f;
+    
+    ma_mutex_lock(&_audio_state->mutex);
+    _audio_state->buses[bus].pan = pan;
+    ma_mutex_unlock(&_audio_state->mutex);
+}
+
+internal float audio_bus_get_pan(uint32_t bus)
+{
+    if (_audio_state == 0 || bus >= AUDIO_MAX_BUSES) { return 0.0f; }
+    
+    ma_mutex_lock(&_audio_state->mutex);
+    float pan = _audio_state->buses[bus].pan;
+    ma_mutex_unlock(&_audio_state->mutex);
+    return pan;
+}
+
+internal void audio_bus_pause(uint32_t bus)
+{
+    if (_audio_state == 0 || bus >= AUDIO_MAX_BUSES) { return; }
+    
+    ma_mutex_lock(&_audio_state->mutex);
+    _audio_state->buses[bus].paused = true;
+    ma_mutex_unlock(&_audio_state->mutex);
+}
+
+internal void audio_bus_resume(uint32_t bus)
+{
+    if (_audio_state == 0 || bus >= AUDIO_MAX_BUSES) { return; }
+    
+    ma_mutex_lock(&_audio_state->mutex);
+    _audio_state->buses[bus].paused = false;
+    ma_mutex_unlock(&_audio_state->mutex);
+}
+
+internal void audio_bus_toggle_pause(uint32_t bus)
+{
+    if (_audio_state == 0 || bus >= AUDIO_MAX_BUSES) { return; }
+    
+    ma_mutex_lock(&_audio_state->mutex);
+    _audio_state->buses[bus].paused = !_audio_state->buses[bus].paused;
+    ma_mutex_unlock(&_audio_state->mutex);
+}
+
+internal bool audio_bus_is_paused(uint32_t bus)
+{
+    if (_audio_state == 0 || bus >= AUDIO_MAX_BUSES) { return false; }
+    
+    ma_mutex_lock(&_audio_state->mutex);
+    bool paused = _audio_state->buses[bus].paused;
+    ma_mutex_unlock(&_audio_state->mutex);
+    return paused;
+}
+
+internal void audio_bus_stop(uint32_t bus)
+{
+    if (_audio_state == 0 || bus >= AUDIO_MAX_BUSES) { return; }
+    
+    ma_mutex_lock(&_audio_state->mutex);
+    _Audio_Voice *voice = _audio_state->active_voices_first;
+    while(voice != 0)
+    {
+        _Audio_Voice *next_voice = voice->next;
+        if(voice->params.bus == bus)
+        {
+            DLLRemove(_audio_state->active_voices_first, _audio_state->active_voices_last, voice);
+            if(voice->decoder_valid)
+            {
+                ma_decoder_uninit(&voice->decoder);
+                voice->decoder_valid = false;
+            }
+            voice->state = _Audio_Voice_State_Inactive;
+            SLLStackPush(_audio_state->free_voice, voice);
+        }
+        voice = next_voice;
+    }
+    ma_mutex_unlock(&_audio_state->mutex);
+}
+
+internal void audio_bus_restart(uint32_t bus)
+{
+    if (_audio_state == 0 || bus >= AUDIO_MAX_BUSES) { return; }
+    
+    ma_mutex_lock(&_audio_state->mutex);
+    for (_Audio_Voice *v = _audio_state->active_voices_first; v != 0; v = v->next)
+    {
+        if (v->params.bus == bus && v->decoder_valid)
+        {
+            ma_decoder_seek_to_pcm_frame(&v->decoder, 0);
+            v->state = _Audio_Voice_State_Playing;
+        }
+    }
+    ma_mutex_unlock(&_audio_state->mutex);
+}
+
 

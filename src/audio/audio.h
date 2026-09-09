@@ -5,6 +5,11 @@
 #define MA_NO_ENGINE
 #include "./external/miniaudio.h"
 
+// ak: Defines
+//=============================================================================
+
+#define AUDIO_MAX_BUSES 64
+
 // ak: Types
 //=============================================================================
 
@@ -50,7 +55,7 @@ struct Audio_Play_Params
     float            volume;      // 0 = silent, 1 = unity gain
     float            pitch;       // 1 = unmodified
     float            pan;         // -1 = full left, 0 = center, 1 = full right
-    uint32_t         bus;         // index in [0, SND_MAX_BUSES)
+    uint32_t         bus;         // index in [0, AUDIO_MAX_BUSES)
     Audio_Play_Flags flags;
 };
 
@@ -77,6 +82,17 @@ struct _Audio_Voice
     bool               decoder_valid;
 };
 
+// ak: Bus ====================================================================
+
+typedef struct _Audio_Bus _Audio_Bus;
+struct _Audio_Bus
+{
+    float volume;
+    float pitch;
+    float pan;
+    bool  paused;
+};
+
 // ak: State
 //=============================================================================
 
@@ -95,6 +111,7 @@ struct _Audio_State
     _Audio_Voice *free_voice;
     _Audio_Voice *active_voices_first;
     _Audio_Voice *active_voices_last;
+    _Audio_Bus   buses[AUDIO_MAX_BUSES];
 };
 
 // ak: Global
@@ -134,4 +151,18 @@ internal double       audio_voice_get_position_seconds(Audio_Handle voice_handle
 internal double       audio_voice_get_duration_seconds(Audio_Handle voice_handle);
 internal bool         audio_voice_seek_seconds(Audio_Handle voice_handle, double seconds);
 internal void         audio_voice_restart(Audio_Handle voice_handle);
+
+internal void         audio_bus_set_volume(uint32_t bus, float volume);
+internal float        audio_bus_get_volume(uint32_t bus);
+internal void         audio_bus_set_pitch(uint32_t bus, float pitch);
+internal float        audio_bus_get_pitch(uint32_t bus);
+internal void         audio_bus_set_pan(uint32_t bus, float pan);
+internal float        audio_bus_get_pan(uint32_t bus);
+internal void         audio_bus_pause(uint32_t bus);
+internal void         audio_bus_resume(uint32_t bus);
+internal void         audio_bus_toggle_pause(uint32_t bus);
+internal bool         audio_bus_is_paused(uint32_t bus);
+internal void         audio_bus_stop(uint32_t bus);
+internal void         audio_bus_restart(uint32_t bus);
+
 
