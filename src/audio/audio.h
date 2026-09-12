@@ -5,7 +5,7 @@
 #define MA_NO_ENGINE
 #include "./external/miniaudio.h"
 
-// ak: Defines
+// ak: Types
 //=============================================================================
 
 #define AUDIO_MAX_BUSES 64
@@ -15,8 +15,14 @@
 
 // ak: Handles ================================================================
 
-typedef struct Audio_Handle Audio_Handle;
-struct Audio_Handle
+typedef struct Audio_Sound Audio_Sound;
+struct Audio_Sound
+{
+    uint64_t u64[1];
+};
+
+typedef struct Audio_Voice Audio_Voice;
+struct Audio_Voice
 {
     uint64_t u64[1];
 };
@@ -34,8 +40,7 @@ typedef struct _Audio_Sound _Audio_Sound;
 struct _Audio_Sound
 {
     _Audio_Sound     *next;
-    void             *data;
-    size_t           size;
+    U8Array          data;
     Str8             path;
     Audio_Load_Flags flags;
     bool             in_use;
@@ -43,40 +48,32 @@ struct _Audio_Sound
 
 // ak: Play Parameters ========================================================
 
-typedef uint32_t Audio_Play_Flags;
-enum
-{
-    Audio_Play_Flag_Loop        = (1<<0),
-    Audio_Play_Flag_StartPaused = (1<<1),
-};
-
 typedef struct Audio_Play_Params Audio_Play_Params;
 struct Audio_Play_Params
 {
-    float            volume;      // 0 = silent, 1 = unity gain
-    float            pitch;       // 1 = unmodified
-    float            pan;         // -1 = full left, 0 = center, 1 = full right
-    uint32_t         bus;         // index in [0, AUDIO_MAX_BUSES)
-    Audio_Play_Flags flags;
+    float    volume; // 0 = silent, 1 = unity gain
+    float    pitch;  // 1 = unmodified
+    float    pan;    // -1 = full left, 0 = center, 1 = full right
+    uint32_t bus;    // index in [0, SND_MAX_BUSES)
+    bool     loop;
 };
 
 // ak: Voice ==================================================================
 
-typedef uint32_t _Audio_Voice_State;
-enum
+typedef enum _Audio_Voice_State
 {
     _Audio_Voice_State_Inactive,
     _Audio_Voice_State_Playing,
     _Audio_Voice_State_Paused,
     _Audio_Voice_State_Finished,
-};
+} _Audio_Voice_State;
 
 typedef struct _Audio_Voice _Audio_Voice;
 struct _Audio_Voice
 {
     _Audio_Voice       *next;
     _Audio_Voice       *prev;
-    Audio_Handle       audio;
+    Audio_Sound        sound;
     _Audio_Voice_State state;
     Audio_Play_Params  params;
     ma_decoder         decoder;
@@ -88,14 +85,14 @@ struct _Audio_Voice
 typedef struct _Audio_Bus _Audio_Bus;
 struct _Audio_Bus
 {
-    float volume;
-    float pitch;
-    float pan;
-    bool  paused;
+    _Audio_Bus *next;
+    float      volume;
+    float      pitch;
+    float      pan;
+    bool       paused;
 };
 
-// ak: State
-//=============================================================================
+// ak: State ==================================================================
 
 typedef struct _Audio_State _Audio_State;
 struct _Audio_State
@@ -165,5 +162,3 @@ internal void         audio_bus_toggle_pause(uint32_t bus);
 internal bool         audio_bus_is_paused(uint32_t bus);
 internal void         audio_bus_stop(uint32_t bus);
 internal void         audio_bus_restart(uint32_t bus);
-
-
