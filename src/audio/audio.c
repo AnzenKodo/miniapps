@@ -268,6 +268,7 @@ internal Audio_Handle audio_load_from_memory(void *data, size_t size, Audio_Load
     sound->in_use = true;
     sound->data   = data;
     sound->size   = size;
+    sound->path   = str8_zero();
     sound->flags  = flags;
     
     // ak: bundle & return
@@ -277,10 +278,60 @@ internal Audio_Handle audio_load_from_memory(void *data, size_t size, Audio_Load
 
 internal Audio_Handle audio_load_from_path(Str8 path, Audio_Load_Flags flags)
 {
-    void *data = NULL;
-    size_t size = os_path_read_full(path, &data, _audio_state->arena);
-    Audio_Handle result = audio_load_from_memory(data, size, flags);
-    return result;
+    if (_audio_state == 0 || path.length == 0)
+    {
+        return audio_handle_zero();
+    }
+    
+    if (flags & Audio_Load_Flag_Stream)
+    {
+        Str8 path_copy = str8_copy(_audio_state->arena, path);
+        
+        // Verify the file can be opened and decoded
+        ma_decoder test_decoder;
+        ma_decoder_config config = ma_decoder_config_init(ma_format_f32, _audio_state->decoder.channels, _audio_state->decoder.sample_rate);
+        ma_result decode_result = ma_decoder_init_file((const char *)path_copy.cstr, &config, &test_decoder);
+        if (decode_result != MA_SUCCESS)
+        {
+            return audio_handle_zero();
+        }
+        ma_decoder_uninit(&test_decoder);
+        
+        // Allocate sound record without reading full file content into RAM
+        _Audio_Sound *sound = _audio_state->free_sound;
+        if (sound)
+        {
+            SLLStackPop(_audio_state->free_sound);
+        }
+        else
+        {
+            sound = arena_push(_audio_state->arena, _Audio_Sound, 1);
+        }
+        
+        sound->in_use = true;
+        sound->data   = NULL;
+        sound->size   = 0;
+        sound->path   = path_copy;
+        sound->flags  = flags;
+        
+        return _audio_handle_from_sound(sound);
+    }
+    else
+    {
+        void *data = NULL;
+        size_t size = os_path_read_full(path, &data, _audio_state->arena);
+        if (size == 0 || data == NULL)
+        {
+            return audio_handle_zero();
+        }
+        Audio_Handle result = audio_load_from_memory(data, size, flags);
+        _Audio_Sound *sound = _audio_sound_from_handle(result);
+        if (sound != 0)
+        {
+            sound->path = str8_copy(_audio_state->arena, path);
+        }
+        return result;
+    }
 }
 
 internal void audio_unload(Audio_Handle handle)
@@ -311,6 +362,8 @@ internal void audio_unload(Audio_Handle handle)
         sound->in_use = false;
         sound->data = NULL;
         sound->size = 0;
+        sound->path = str8_zero();
+        sound->flags = 0;
         SLLStackPush(_audio_state->free_sound, sound);
         ma_mutex_unlock(&_audio_state->mutex);
     }
@@ -330,6 +383,11 @@ internal Audio_Handle audio_play(Audio_Handle audio, Audio_Play_Params params)
         params.bus = 0;
     }
     
+    if (sound->flags & Audio_Load_Flag_Loop)
+    {
+        params.flags |= Audio_Play_Flag_Loop;
+    }
+    
     ma_mutex_lock(&_audio_state->mutex);
     
     _Audio_Voice *voice = _audio_state->free_voice;
@@ -343,7 +401,17 @@ internal Audio_Handle audio_play(Audio_Handle audio, Audio_Play_Params params)
     }
     
     ma_decoder_config config = ma_decoder_config_init(ma_format_f32, _audio_state->decoder.channels, _audio_state->decoder.sample_rate);
-    ma_result decode_result = ma_decoder_init_memory(sound->data, sound->size, &config, &voice->decoder);
+    ma_result decode_result;
+    
+    if ((sound->flags & Audio_Load_Flag_Stream) && sound->path.cstr != NULL)
+    {
+        decode_result = ma_decoder_init_file((const char *)sound->path.cstr, &config, &voice->decoder);
+    }
+    else
+    {
+        decode_result = ma_decoder_init_memory(sound->data, sound->size, &config, &voice->decoder);
+    }
+    
     if(decode_result == MA_SUCCESS)
     {
         voice->decoder_valid = true;

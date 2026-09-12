@@ -36,6 +36,7 @@ struct _Audio_Sound
     _Audio_Sound     *next;
     void             *data;
     size_t           size;
+    Str8             path;
     Audio_Load_Flags flags;
     bool             in_use;
 };
