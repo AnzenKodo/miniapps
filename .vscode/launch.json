@@ -1,0 +1,70 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug Program",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/serpent-path_debug",
+            "cwd": "${workspaceFolder}",
+            "type": "cppdbg",
+            // "arguments": "shaders/circles.frag",
+            "preLaunchTask": "Build Program"
+        },
+        {
+            "name": "Debug Build",
+            "request": "launch",
+            "program": "${workspaceFolder}/a.out",
+            "cwd": "${workspaceFolder}",
+            "type": "cppdbg",
+            "args": [ "build-run", "play", "release" ],
+            "arguments": "build-run",
+            "preLaunchTask": "Build Build"
+        },
+        {
+            "name": "Debug Meta",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/mdg_debug",
+            "cwd": "${workspaceFolder}",
+            "type": "cppdbg",
+            "args": [ "std", "src" ],
+            "arguments": "src",
+            "preLaunchTask": "Build Meta"
+        },
+        {
+            "name": "Debug Program Windows",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/serpent-path_debug.exe",
+            "cwd": "${workspaceFolder}",
+            "type": "cppvsdbg",
+        },
+        {
+            "name": "Build & Debug Program Windows",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/serpent-path_debug.exe",
+            "cwd": "${workspaceFolder}",
+            "type": "cppvsdbg",
+            "preLaunchTask": "Build Program Windows"
+        },
+        {
+            "name": "Debug Build Windows",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/build.exe",
+            "cwd": "${workspaceFolder}",
+            "type": "cppvsdbg",
+            // "args": [ "build-run" ],
+            "args": [ "-name=jone" ],
+            "arguments": "build-run"
+        },
+        {
+            "name": "Debug Meta Windows",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/mdg_debug.exe",
+            "cwd": "${workspaceFolder}",
+            "type": "cppvsdbg",
+            // "args": [ "build-run" ],
+            "args": [ "src" ],
+            "arguments": "src",
+            // "preLaunchTask": "Build Meta"
+        },
+    ]
+}
