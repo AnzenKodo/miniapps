@@ -124,7 +124,6 @@ internal void flags_init(void)
     Arena *arena = arena_alloc();
     _flags_state = arena_push(arena, _Flags_State, 1);
     _flags_state->arena = arena;
-    _flags_state->log_context = log_init();
 }
 
 internal void flags_clean(void)
@@ -614,65 +613,59 @@ internal void flags_print_error(void)
         {
             case _Flags_Error_Kind_MissingValue:
             {
-                log_errorfln(&_flags_state->log_context,
+                fmt_eprintfln(
                     "opiton '%.*s' requires a value. Example: '--%.*s <value>'.",
                     str8_varg(error->flag_name), str8_varg(error->flag_name));
             }
             break;
             case _Flags_Error_Kind_UnknownOption:
             {
-                log_errorfln(&_flags_state->log_context, "opiton '%.*s' is invalid.", str8_varg(error->flag_name));
+                fmt_eprintfln("opiton '%.*s' is invalid.", str8_varg(error->flag_name));
             }
             break;
             case _Flags_Error_Kind_NoFlagPrefix:
             {
-                log_errorfln(&_flags_state->log_context,
-                    "'%.*s' is not recognized as a opiton. Option must start with '-', '--', or '/' (Windows only). Examples: '-%.*s', '--%.*s', '/%.*s'.",
+                fmt_eprintfln("'%.*s' is not recognized as a opiton. Option must start with '-', '--', or '/' (Windows only). Examples: '-%.*s', '--%.*s', '/%.*s'.",
                     str8_varg(error->flag_name), str8_varg(error->flag_name), str8_varg(error->flag_name), str8_varg(error->flag_name));
             }
             break;
             case _Flags_Error_Kind_DuplicateOption:
             {
-                log_errorfln(&_flags_state->log_context, "option '%.*s' was specified multiple times.", str8_varg(error->flag_name));
+                fmt_eprintfln("option '%.*s' was specified multiple times.", str8_varg(error->flag_name));
             }
             break;
             case _Flags_Error_Kind_RequireOption:
             {
-                log_errorfln(&_flags_state->log_context, "missing required option '--%.*s'.", str8_varg(error->flag_name));
+                fmt_eprintfln("missing required option '--%.*s'.", str8_varg(error->flag_name));
             }
             break;
             case _Flags_Error_Kind_InvalidIntOption:
             {
-                log_errorfln(&_flags_state->log_context,
-                    "option '%.*s' expects an integer value, but '%.*s' was given. Examples: '--%.*s 42', '--%.*s -7', '--%.*s 123'.",
+                fmt_eprintfln("option '%.*s' expects an integer value, but '%.*s' was given. Examples: '--%.*s 42', '--%.*s -7', '--%.*s 123'.",
                     str8_varg(error->flag_name), str8_varg(error->value), str8_varg(error->flag_name), str8_varg(error->flag_name), str8_varg(error->flag_name));
             }
             break;
             case _Flags_Error_Kind_UIntMinusOption:
             {
-                log_errorfln(&_flags_state->log_context,
-                    "option '%.*s' does not accept negative values (got '%.*s'). Use a positive integer instead.",
+                fmt_eprintfln("option '%.*s' does not accept negative values (got '%.*s'). Use a positive integer instead.",
                     str8_varg(error->flag_name), str8_varg(error->value));
             }
             break;
             case _Flags_Error_Kind_InvalidFloatOption:
             {
-                log_errorfln(&_flags_state->log_context,
-                    "option '%.*s' expects a floating-point number, but '%.*s' was given. Examples: '--%.*s .14', '--%.*s -0.5', '--%.*s 2', '--%.*s 2.0'.",
+                fmt_eprintfln("option '%.*s' expects a floating-point number, but '%.*s' was given. Examples: '--%.*s .14', '--%.*s -0.5', '--%.*s 2', '--%.*s 2.0'.",
                     str8_varg(error->flag_name), str8_varg(error->value), str8_varg(error->flag_name), str8_varg(error->flag_name), str8_varg(error->flag_name), str8_varg(error->flag_name));
             }
             break;
             case _Flags_Error_Kind_InvalidBool:
             {
-                log_errorfln(&_flags_state->log_context,
-                    "option '%.*s' expects a boolean value, but '%.*s' was given. Enter 'true', 'false' or no value for true.",
+                fmt_eprintfln("option '%.*s' expects a boolean value, but '%.*s' was given. Enter 'true', 'false' or no value for true.",
                     str8_varg(error->flag_name), str8_varg(error->value));
             }
             break;
             case _Flags_Error_Kind_SingleValue:
             {
-                log_errorfln(&_flags_state->log_context,
-                    "option '%.*s' only accepts single value.",
+                fmt_eprintfln("option '%.*s' only accepts single value.",
                     str8_varg(error->flag_name));
             }
             break;
@@ -680,49 +673,42 @@ internal void flags_print_error(void)
             {
                 if (_flags_state->index_arg > 0)
                 {
-                    log_errorfln(&_flags_state->log_context,
-                        "command only accepts >= (less equal to) %zu arguments without options.",
+                    fmt_eprintfln("command only accepts >= (less equal to) %zu arguments without options.",
                         _flags_state->index_arg);
                 }
                 else
                 {
-                    log_errorfln(&_flags_state->log_context,
-                        "command don't accepts any arguments without options.");
+                    fmt_eprintfln("command don't accepts any arguments without options.");
                 }
             }
             break;
             case _Flags_Error_Kind_RequireArg:
             {
-                log_errorfln(&_flags_state->log_context,
-                    "at least %zu argument without option is required.",
+                fmt_eprintfln("at least %zu argument without option is required.",
                     error->arg_index + 1);
             }
             break;
             case _Flags_Error_Kind_InvalidIntArg:
             {
-                log_errorfln(&_flags_state->log_context,
-                    "%zu argument without option should be integer. Examples: '42', '-7', '123'.",
+                fmt_eprintfln("%zu argument without option should be integer. Examples: '42', '-7', '123'.",
                     error->arg_index + 1);
             }
             break;
             case _Flags_Error_Kind_UIntMinusArg:
             {
-                log_errorfln(&_flags_state->log_context,
-                    "%zu argument without option does not accept negative values (got '%.*s'). Use a positive integer instead.",
+                fmt_eprintfln("%zu argument without option does not accept negative values (got '%.*s'). Use a positive integer instead.",
                     error->arg_index + 1, str8_varg(error->value));
             }
             break;
             case _Flags_Error_Kind_InvalidFloatArg:
             {
-                log_errorfln(&_flags_state->log_context,
-                    "%zu argument without option expects a floating-point number, but '%.*s' was given. Examples: '.14', '-0.5', '2', '2.0'.",
+                fmt_eprintfln("%zu argument without option expects a floating-point number, but '%.*s' was given. Examples: '.14', '-0.5', '2', '2.0'.",
                     error->arg_index + 1, str8_varg(error->value));
             }
             break;
             case _Flags_Error_Kind_OptionAfterArg:
             {
-                log_errorfln(&_flags_state->log_context,
-                    "%zu argument, which is '%.*s', is an option but an argument was expected.",
+                fmt_eprintfln("%zu argument, which is '%.*s', is an option but an argument was expected.",
                     error->arg_index + 1, str8_varg(error->value));
             }
         }

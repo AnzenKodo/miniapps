@@ -151,7 +151,6 @@ struct _Flags_State
     size_t index_arg;
     bool has_error;
     bool is_arg_array_assigned;
-    Log_Context log_context;
 };
 
 // ak: Functions

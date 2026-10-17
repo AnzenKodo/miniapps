@@ -1,95 +1,82 @@
 //-----------------------------------------------------------------------------
 // Reference:
 // - By Go Authors: https://pkg.go.dev/log
+// - By Epic Games Tools & Ryan Fleury:
+//      - https://github.com/EpicGames/raddebugger/blob/e28a543573277315ffd32a3e983c8171570bb946/src/base/base_log.h
+//      - https://github.com/EpicGames/raddebugger/blob/e28a543573277315ffd32a3e983c8171570bb946/src/base/base_log.c
 //-----------------------------------------------------------------------------
 
 #ifndef BASE_LOG_H
 #define BASE_LOG_H
 
-//~ ak: Types
+// ak: Types
 //=============================================================================
 
-typedef enum Log_Level {
-    Log_Level_None,
-    Log_Level_Info,
-    Log_Level_Debug,
-    Log_Level_Warn,
-    Log_Level_Error,
+typedef enum Log_Level
+{
+  Log_Level_Info,
+  Log_Level_Debug,
+  Log_Level_Warn,
+  Log_Level_Error,
+  Log_Level_COUNT
 } Log_Level;
 
-typedef struct Log_Context Log_Context;
-struct Log_Context {
-    Log_Level level;
-    Fs_File file;
-    bool print_level_prefix;
-    bool enable_color_log;
+typedef struct Log_Result Log_Result;
+struct Log_Result
+{
+    Str8 strings[Log_Level_COUNT];
 };
 
-//~ ak: Functions
+typedef struct Log Log;
+struct Log
+{
+    Arena *arena;
+    Str8_List strings[Log_Level_COUNT];
+    Str8 file_name;
+    size_t line_number;
+};
+
+// ak: Functions
 //=============================================================================
 
-//~ ak: Helper Functions ======================================================
+// ak: Log Creation ===========================================================
 
-internal const char *log_get_reset_color(Log_Context *log);
-internal const char *log_get_level_color(Log_Level level);
-internal const char *log_get_level_string(Log_Level level);
-internal const char *log_get_file_info_color(Log_Context *log);
-internal void log_print_color_level(Log_Context *log, Log_Level level);
+internal Log *log_alloc(void);
+internal void log_free(Log *log);
 
-//~ ak: Initialization Functions ==============================================
+// ak: Log Building ===========================================================
 
-internal Log_Context log_init(void);
+internal void log_msg(Log *log, Log_Level level, const char *file_name, size_t line_number, Str8 string);
+internal void log_msgf(Log *log, Log_Level level, const char *file_name, size_t line_number, const char *format, ...);
 
-//~ ak: Log Level Print Functions =============================================
+// ak: Log Result =============================================================
 
-//- ak: print normal
-internal void log_print(Log_Context *log, Log_Level level, const char *format);
-internal void log_info(Log_Context *log, const char *format);
-internal void log_debug(Log_Context *log, const char *format);
-internal void log_warn(Log_Context *log, const char *format);
-internal void log_error(Log_Context *log, const char *format);
+internal Log_Result log_get_result(Log *log, size_t indent, Arena *arena);
 
-//- ak: print with newline
-internal void log_println(Log_Context *log, Log_Level level, const char *format);
-internal void log_infoln(Log_Context *log, const char *format);
-internal void log_debugln(Log_Context *log, const char *format);
-internal void log_warnln(Log_Context *log, const char *format);
-internal void log_errorln(Log_Context *log, const char *format);
-
-//- ak: print with format
-internal void log_vprintf(Log_Context *log, Log_Level level, const char *format, va_list args);
-internal void log_infof(Log_Context *log, const char *format, ...);
-internal void log_debugf(Log_Context *log, const char *format, ...);
-internal void log_warnf(Log_Context *log, const char *format, ...);
-internal void log_errorf(Log_Context *log, const char *format, ...);
-
-//- ak: print with format and newline
-internal void log_vprintfln(Log_Context *log, Log_Level level, const char *format, va_list args);
-internal void log_infofln(Log_Context *log, const char *format, ...);
-internal void log_debugfln(Log_Context *log, const char *format, ...);
-internal void log_warnfln(Log_Context *log, const char *format, ...);
-internal void log_errorfln(Log_Context *log, const char *format, ...);
-
-//~ ak: Macros
+// ak: Macros
 //=============================================================================
 
-#define LogPrintfLine(log, level, format, ...) do { \
-    const char *line_info_color = log_get_file_info_color(log); \
-    fmt_fprintf((log)->file, "%s%s:%d%s ", line_info_color, FILE_NAME, LINE_NUMBER, log_get_reset_color(log)); \
-    log_print_color_level((log), level); \
-    fmt_fprintfln((log)->file, format, ##__VA_ARGS__); \
-} while(0)
-#define LogInfoLine(log, format, ...) do { \
-    LogPrintfLine(log, Log_Level_Info, format, ##__VA_ARGS__); \
-} while(0)
-#define LogDebugLine(log, format, ...) do { \
-    LogPrintfLine(log, Log_Level_Debug, format, ##__VA_ARGS__); \
-} while(0)
-#define LogWarnLine(log, format, ...) do { \
-    LogPrintfLine(log, Log_Level_Warn, format, ##__VA_ARGS__); \
-} while(0)
-#define LogErrorLine(log, format, ...) do { \
-    LogPrintfLine(log, Log_Level_Error, format, ##__VA_ARGS__); \
-} while(0)
+#define LogInfo(log, s)     log_msg((log),  Log_Level_Info,  FILE_NAME, LINE_NUMBER, (s))
+#define LogInfoF(log, ...)  log_msgf((log), Log_Level_Info,  FILE_NAME, LINE_NUMBER, __VA_ARGS__)
+#define LogDebug(log, s)    log_msg((log),  Log_Level_Debug, FILE_NAME, LINE_NUMBER, (s))
+#define LogDebugF(log, ...) log_msgf((log), Log_Level_Debug, FILE_NAME, LINE_NUMBER, __VA_ARGS__)
+#define LogWarn(log, s)     log_msg((log),  Log_Level_Warn,  FILE_NAME, LINE_NUMBER, (s))
+#define LogWarnF(log, ...)  log_msgf((log), Log_Level_Warn,  FILE_NAME, LINE_NUMBER, __VA_ARGS__)
+#define LogError(log, s)    log_msg((log),  Log_Level_Error, FILE_NAME, LINE_NUMBER, (s))
+#define LogErrorF(log, ...) log_msgf((log), Log_Level_Error, FILE_NAME, LINE_NUMBER, __VA_ARGS__)
+
+#define LogInfoNamedBlock(s)     DeferLoop(log_infof("%S:\n{\n", (s)), log_infof("}\n"))
+#define LogInfoNamedBlockF(...)  DeferLoop((log_infof(__VA_ARGS__), log_infof(":\n{\n")), log_infof("}\n"))
+#define LogDebugNamedBlock(s)    DeferLoop(log_debugf("%S:\n{\n", (s)), log_debugf("}\n"))
+#define LogDebugNamedBlockF(...) DeferLoop((log_debugf(__VA_ARGS__), log_debugf(":\n{\n")), log_debugf("}\n"))
+#define LogWarnNamedBlock(s)     DeferLoop(log_warnf("%S:\n{\n", (s)), log_warnf("}\n"))
+#define LogWarnNamedBlockF(...)  DeferLoop((log_warnf(__VA_ARGS__), log_warnf(":\n{\n")), log_warnf("}\n"))
+#define LogErrorNamedBlock(s)    DeferLoop(log_errorf("%S:\n{\n", (s)), log_errorf("}\n"))
+#define LogErrorNamedBlockF(...) DeferLoop((log_errorf(__VA_ARGS__), log_errorf(":\n{\n")), log_errorf("}\n"))
+
+// ak: Global
+//=============================================================================
+
+global Log *g_log = NULL;
 
 #endif // BASE_LOG_H
