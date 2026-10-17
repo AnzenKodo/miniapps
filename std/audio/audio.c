@@ -1,962 +1,2041 @@
-// #define MINIAUDIO_IMPLEMENTATION
-// #include "./external/miniaudio.h"
+#define DR_WAV_IMPLEMENTATION
+#include "./external/dr_wav.h"
 
-// ak: Helpers
+#define DR_MP3_IMPLEMENTATION
+#include "./external/dr_mp3.h"
+
+#define QOA_IMPLEMENTATION
+#include "./external/qoa.h"           // QOA loading and saving functions
+#include "./external/qoaplay.c"       // QOA stream playing helper functions
+
+#define DR_FLAC_IMPLEMENTATION
+#include "external/dr_flac.h"
+
+// STB_VORBIS_NO_STDIO
+// #define NULL 0
+// #define malloc(s)   0
+// #define free(s)     ((void) 0)
+// #define realloc(s)  0
+#include "./external/stb_vorbis.c" // for OGG
+
+
+// Helper
 //=============================================================================
 
-internal Audio_Sound audio_sound_zero(void)
+internal void _audio_ma_log(void *user_data, ma_uint32 level, const char *message)
 {
-    return StructZeroType(Audio_Sound);
-}
-
-internal Audio_Sound _audio_handle_from_sound(_Audio_Sound *_sound)
-{
-    Audio_Sound sound = {(uintptr_t)_sound};
-    return sound;
-}
-
-internal _Audio_Sound *_audio_sound_from_handle(Audio_Sound sound)
-{
-    _Audio_Sound *_sound = (_Audio_Sound *)sound.u64[0];
-    return _sound;
-}
-
-internal _Audio_Voice *_audio_voice_from_handle(Audio_Voice voice)
-{
-    _Audio_Voice *_voice = (_Audio_Voice *)voice.u64[0];
-    return _voice;
-}
-
-internal Audio_Voice audio_voice_zero(void)
-{
-    return StructZeroType(Audio_Voice);
-}
-
-internal Audio_Voice _audio_voice_handle_from_voice(_Audio_Voice *_voice)
-{
-    Audio_Voice voice = {(uintptr_t)_voice};
-    return voice;
-}
-
-internal bool audio_handle_is_valid(Audio_Sound sound)
-{
-    return _audio_sound_from_handle(sound) != NULL;
-}
-
-internal void _audio_callback(ma_device* device, void* output, const void* input, ma_uint32 frame_count)
-{
-    uint32_t channels = _audio_state->decoder.channels;
-    float *out_buf = (float *)output;
-    mem_set(out_buf, 0, frame_count * channels * sizeof(float));
-    
-    ma_mutex_lock(&_audio_state->mutex);
-    
-    _Audio_Voice *voice = _audio_state->active_voices_first;
-    while(voice != NULL)
+    Unused(user_data);
+    switch(level)
     {
-        _Audio_Voice *next_voice = voice->next;
+        case MA_LOG_LEVEL_DEBUG:   { LogDebug(g_log, str8(message)); } break;
+        case MA_LOG_LEVEL_INFO:    { LogInfo(g_log,  str8(message)); } break;
+        case MA_LOG_LEVEL_WARNING: { LogWarn(g_log,  str8(message)); } break;
+        case MA_LOG_LEVEL_ERROR:   { LogError(g_log, str8(message)); } break;
+    }
+}
+
+// ak: Main mixing function, pretty simple in this project, only an accumulation
+// NOTE(ak): frame_out is both an input and an output, it is initially filled
+// with zeros outside of this function
+internal void _audio_mix_frames(float *frame_out, const float *frame_in, ma_uint32 frame_count, Audio_Buffer *buffer)
+{
+    const float local_volume = buffer->volume;
+    const ma_uint32 channels = _audio_state->system.device.playback.channels;
+    
+    if (channels == 2) // Consider panning
+    {
+        const float right = (buffer->pan + 1.0f)/2.0f; // Normalize: [-1..1] -> [0..1]
+        const float left = 1.0f - right;
         
-        if(voice->state == _Audio_Voice_State_Playing && voice->decoder_valid)
+        // ak: Fast sine approximation in [0..1] for pan law: y = 0.5f*x*(3 - x*x);
+        const float levels[2] = { local_volume*0.5f*left*(3.0f - left*left), local_volume*0.5f*right*(3.0f - right*right) };
+        float *frameOut = frame_out;
+        const float *frameIn = frame_in;
+        for (ma_uint32 frame = 0; frame < frame_count; frame++)
         {
-            uint32_t bus_idx = voice->params.bus;
-            if(bus_idx >= AUDIO_MAX_BUSES)
+            frameOut[0] += (frameIn[0]*levels[0]);
+            frameOut[1] += (frameIn[1]*levels[1]);
+            frameOut += 2;
+            frameIn += 2;
+        }
+    }
+    else  // Do not consider panning
+    {
+        for (ma_uint32 frame = 0; frame < frame_count; frame++)
+        {
+            for (ma_uint32 c = 0; c < channels; c++)
             {
-                bus_idx = 0;
+                float *frameOut = frame_out + (frame*channels);
+                const float *frameIn = frame_in + (frame*channels);
+                // ak: Output accumulates input multiplied by volume to provided
+                // output (usually 0)
+                frameOut[c] += (frameIn[c]*local_volume);
             }
-            _Audio_Bus *bus = &_audio_state->buses[bus_idx];
-            
-            if(!bus->paused)
+        }
+    }
+}
+
+internal void _audio_on_send_audio_data_to_device(ma_device *device, void *frame_out, const void *frame_input, ma_uint32 frame_count)
+{
+    Unused(frame_input);
+    // ak: mixing is basically an accumulation, need to initialize the output
+    // buffer to 0
+    mem_set(frame_out, 0, frame_count*device->playback.channels*ma_get_bytes_per_sample(device->playback.format));
+    ma_mutex_lock(&_audio_state->system.lock);
+    {
+        for (Audio_Buffer *audio_buffer = _audio_state->buffer.first; audio_buffer != NULL; audio_buffer = audio_buffer->next)
+        {
+            // ak: ignore stopped or paused sounds
+            if (!audio_buffer->playing || audio_buffer->paused) continue;
+            ma_uint32 frames_read = 0;
+            while (true)
             {
-                #define MIX_BUFFER_SIZE 1024
-                float mix_buf[MIX_BUFFER_SIZE * 8];
-                
-                uint32_t out_channels = channels;
-                if (out_channels > 8) out_channels = 8;
-                
-                ma_uint32 frames_mixed = 0;
-                while(frames_mixed < frame_count)
+                if (frames_read >= frame_count) break;
+                // ak: read as much data as possible from the stream
+                ma_uint32 frames_to_read = (frame_count - frames_read);
+                while (frames_to_read > 0)
                 {
-                    ma_uint32 chunk_frames = frame_count - frames_mixed;
-                    if(chunk_frames > MIX_BUFFER_SIZE)
+                    float temp_buffer[1024] = STRUCT_ZERO; // frames for stereo
+                    ma_uint32 frames_to_read_right_now = frames_to_read;
+                    if (frames_to_read_right_now > sizeof(temp_buffer)/sizeof(temp_buffer[0])/AUDIO_DEVICE_CHANNELS)
                     {
-                        chunk_frames = MIX_BUFFER_SIZE;
+                        frames_to_read_right_now = sizeof(temp_buffer)/sizeof(temp_buffer[0])/AUDIO_DEVICE_CHANNELS;
                     }
                     
-                    ma_uint64 frames_read = 0;
-                    ma_result result = ma_decoder_read_pcm_frames(&voice->decoder, mix_buf, chunk_frames, &frames_read);
-                    
-                    float volume = voice->params.volume * bus->volume;
-                    if(volume < 0.f) volume = 0.f;
-                    
-                    float left_gain = volume;
-                    float right_gain = volume;
-                    if(out_channels == 2)
+                    ma_uint32 frames_just_read = audio_buffer_read_frames_in_mixing_format(audio_buffer, temp_buffer, frames_to_read_right_now);
+                    if (frames_just_read > 0)
                     {
-                        float pan = voice->params.pan + bus->pan;
-                        if(pan < -1.f) pan = -1.f;
-                        if(pan > 1.f)  pan = 1.f;
+                        float *frames_out = (float *)frame_out + (frames_read*_audio_state->system.device.playback.channels);
+                        float *frame_in = temp_buffer;
                         
-                        if(pan < 0.f)
+                        // ak: apply processors chain if defined
+                        Audio_Processor *processor = audio_buffer->processor;
+                        while (processor)
                         {
-                            right_gain *= (1.f + pan);
+                            processor->process(frame_in, frames_just_read);
+                            processor = processor->next;
                         }
-                        else if(pan > 0.f)
-                        {
-                            left_gain *= (1.f - pan);
-                        }
+                        _audio_mix_frames(frames_out, frame_in, frames_just_read, audio_buffer);
+                        frames_to_read -= frames_just_read;
+                        frames_read += frames_just_read;
                     }
                     
-                    for(ma_uint32 i = 0; i < frames_read; i++)
+                    if (!audio_buffer->playing)
                     {
-                        for(uint32_t c = 0; c < out_channels; c++)
-                        {
-                            float sample = mix_buf[i * out_channels + c];
-                            if(out_channels == 2)
-                            {
-                                sample *= (c == 0) ? left_gain : right_gain;
-                            }
-                            else
-                            {
-                                sample *= volume;
-                            }
-                            out_buf[(frames_mixed + i) * channels + c] += sample;
-                        }
+                        frames_read = frame_count;
+                        break;
                     }
                     
-                    frames_mixed += (ma_uint32)frames_read;
-                    
-                    if(result != MA_SUCCESS || frames_read < chunk_frames)
+                    // ak: if all the frames requested can't be read, break
+                    if (frames_just_read < frames_to_read_right_now)
                     {
-                        if(voice->params.loop)
+                        if (!audio_buffer->looping)
                         {
-                            ma_decoder_seek_to_pcm_frame(&voice->decoder, 0);
+                            audio_buffer_stop_in_locked_state(audio_buffer);
+                            break;
                         }
                         else
                         {
-                            voice->state = _Audio_Voice_State_Finished;
-                            break;
+                            // ak: should never get here, but for safety, move
+                            // the cursor position back to the start and
+                            // continue the loop
+                            audio_buffer->frame_cursor_pos = 0;
+                            continue;
                         }
                     }
                 }
-                #undef MIX_BUFFER_SIZE
+                // ak: if for some reason is not possible to read every frame, the
+                // loop needs to be broken. Not doing this could theoretically
+                // end up into an infinite loop.
+                if (frames_to_read > 0) break;
             }
         }
-        
-        if(voice->state == _Audio_Voice_State_Finished)
-        {
-            DLLRemove(_audio_state->active_voices_first, _audio_state->active_voices_last, voice);
-            if(voice->decoder_valid)
-            {
-                ma_decoder_uninit(&voice->decoder);
-                voice->decoder_valid = false;
-            }
-            voice->state = _Audio_Voice_State_Inactive;
-            SLLStackPush(_audio_state->free_voice, voice);
-        }
-        
-        voice = next_voice;
     }
-    
-    ma_mutex_unlock(&_audio_state->mutex);
-    (void)input;
-    (void)device;
+    Audio_Processor *processor = _audio_state->processor_mixed;
+    while (processor)
+    {
+        processor->process(frame_out, frame_count);
+        processor = processor->next;
+    }
+    ma_mutex_unlock(&_audio_state->system.lock);
 }
 
-// ak: Play Parameters
+// ak: Initialization and Deinitialization Audio Device and State
 //=============================================================================
 
-internal Audio_Play_Params audio_play_params_default(void)
+internal void audio_init(void)
 {
-    return (Audio_Play_Params) {
-        .volume = 1.f,
-        .pitch  = 1.f,
-        .pan    = 0.f,
-        .bus    = 0,
-        .loop   = false,
-    };
-}
-
-// ak: Lifetime
-//=============================================================================
-
-internal bool audio_init(uint32_t sample_rate, uint32_t channel_count)
-{
-    bool result = false;
+    if (_audio_state != NULL) { return; }
     
-    // ak: initialize sate
     Arena *arena = arena_alloc();
     _audio_state = arena_push(arena, _Audio_State, 1);
     _audio_state->arena = arena;
-    _audio_state->decoder.format = ma_format_f32;
-    _audio_state->decoder.channels = channel_count;
-    _audio_state->decoder.sample_rate = sample_rate;
     
-    // ak: initialize buses
-    for(uint32_t i = 0; i < AUDIO_MAX_BUSES; i++)
+    ma_context_config context_config = ma_context_config_init();
+    ma_result result = ma_context_init(NULL, 0, &context_config, &_audio_state->system.context);
+    if (result != MA_SUCCESS)
     {
-        _audio_state->buses[i].volume = 1.0f;
-        _audio_state->buses[i].pitch  = 1.0f;
-        _audio_state->buses[i].pan    = 0.0f;
-        _audio_state->buses[i].paused = false;
+        LogWarnF(g_log, "Audio: failed to initialize context");
     }
-    
-    // ak: initialize device config
-    ma_device_config config  = ma_device_config_init(ma_device_type_playback);
-    // Set to ma_format_unknown to use the device's native format.
-    config.playback.format   = _audio_state->decoder.format;
-    // Set to 0 to use the device's native channel count.
-    config.playback.channels = _audio_state->decoder.channels;
-    // Set to 0 to use the device's native sample rate.
-    config.sampleRate        = _audio_state->decoder.sample_rate;
-    config.dataCallback      = _audio_callback;
-
-    // ak: initialize device
-    ma_result init_result = ma_device_init(NULL, &config, &_audio_state->device);
-    if (init_result == MA_SUCCESS)
+    else
     {
-        ma_result mutex_result = ma_mutex_init(&_audio_state->mutex);
-        if (mutex_result == MA_SUCCESS)
+        ma_log_register_callback(ma_context_get_log(&_audio_state->system.context), ma_log_callback_init(_audio_ma_log, NULL));
+
+        // ak: init audio device
+        // NOTE(ak): Using the default device. Format is floating point because
+        // it simplifies mixing
+        ma_device_config config = ma_device_config_init(ma_device_type_playback);
+        config.playback.pDeviceID = NULL;        // NULL for the default playback
+        config.playback.format = (ma_format)AUDIO_DEVICE_FORMAT;
+        config.playback.channels = AUDIO_DEVICE_CHANNELS;
+        config.sampleRate = AUDIO_DEVICE_SAMPLE_RATE;
+        config.periodSizeInFrames = AUDIO_DEVICE_PERIOD_SIZE_IN_FRAMES;
+        config.dataCallback = _audio_on_send_audio_data_to_device;
+        config.pUserData = NULL;
+        config.noPreSilencedOutputBuffer = true; // pre-silences the output buffer manually
+        config.noFixedSizedCallback = true;      // does not require fixed sized callback guarantees. This bypasses an internal intermediary buffer
+
+        result = ma_device_init(&_audio_state->system.context, &config, &_audio_state->system.device);
+        if (result != MA_SUCCESS)
         {
-            ma_result start_result = ma_device_start(&_audio_state->device);
-            if(start_result == MA_SUCCESS)
+            LogWarnF(g_log, "Audio: failed to initialize playback device");
+            ma_context_uninit(&_audio_state->system.context);
+        }
+        else
+        {
+            if (ma_mutex_init(&_audio_state->system.lock) != MA_SUCCESS)
             {
-                result = true;
+                LogWarnF(g_log, "Audio: failed to create mutex for mixing");
+                ma_device_uninit(&_audio_state->system.device);
+                ma_context_uninit(&_audio_state->system.context);
             }
             else
             {
-                ma_mutex_uninit(&_audio_state->mutex);
-                ma_device_uninit(&_audio_state->device);
+                result = ma_device_start(&_audio_state->system.device);
+                if (result != MA_SUCCESS)
+                {
+                    LogWarnF(g_log, "Audio: failed to start playback device");
+                    ma_device_uninit(&_audio_state->system.device);
+                    ma_context_uninit(&_audio_state->system.context);
+                }
+
+                LogInfoF(g_log, "Audio: Device initialized successfully");
+                LogInfoF(g_log, "    > Backend:       miniaudio | %s", ma_get_backend_name(_audio_state->system.context.backend));
+                LogInfoF(g_log, "    > Format:        %s -> %s", ma_get_format_name(_audio_state->system.device.playback.format), ma_get_format_name(_audio_state->system.device.playback.internalFormat));
+                LogInfoF(g_log, "    > Channels:      %d -> %d", _audio_state->system.device.playback.channels, _audio_state->system.device.playback.internalChannels);
+                LogInfoF(g_log, "    > Sample rate:   %d -> %d", _audio_state->system.device.sampleRate, _audio_state->system.device.playback.internalSampleRate);
+                LogInfoF(g_log, "    > Periods size:  %d", _audio_state->system.device.playback.internalPeriodSizeInFrames*_audio_state->system.device.playback.internalPeriods);
+
+                _audio_state->system.is_ready = true;
             }
         }
-        else
-        {
-            ma_device_uninit(&_audio_state->device);
-        }
     }
-    
-    return result;
 }
 
-internal void audio_cleanup(void)
+internal void audio_uninit(void)
 {
-    if (_audio_state != 0)
+    if(_audio_state != NULL && _audio_state->system.is_ready)
     {
-        ma_device_uninit(&_audio_state->device);
-        ma_mutex_uninit(&_audio_state->mutex);
+        ma_device_uninit(&_audio_state->system.device);
+        ma_mutex_uninit(&_audio_state->system.lock);
+        ma_context_uninit(&_audio_state->system.context);
+        
+        arena_free(_audio_state->system.pcm.arena);
+        _audio_state->system.pcm.buffer = NULL;
+        _audio_state->system.pcm.buffer_size = 0;
+        
+        _audio_state->system.is_ready = false;
         arena_free(_audio_state->arena);
-        _audio_state = 0;
-    }
-}
-
-// ak: Loading
-//=============================================================================
-
-internal Audio_Sound audio_load_from_memory(U8Array data, Audio_Load_Flags flags)
-{
-    if (data.v == NULL || data.size == 0) { return audio_sound_zero(); }
-    
-    // ak: allocate sound record
-    _Audio_Sound *_sound = _audio_state->free_sound;
-    if (_sound)
-    {
-        SLLStackPop(_audio_state->free_sound);
+        _audio_state = NULL;
+        
+        LogInfoF(g_log, "Audio: Device closed successfully");
     }
     else
     {
-        _sound = arena_push(_audio_state->arena, _Audio_Sound, 1);
+        LogInfoF(g_log, "Audio: Device could not be closed, not currently initialized");
     }
-    
-    // ak: fill sound data
-    _sound->in_use = true;
-    _sound->data   = data;
-    _sound->path   = StructZeroType(Str8);
-    _sound->flags  = flags;
-    
-    // ak: bundle & return
-    Audio_Sound result = _audio_handle_from_sound(_sound);
+}
+
+internal Str8 audio_file_export_to_str8(Str8 file_name, Str8 name, size_t wrap_size, Arena *arena)
+{
+    Audio_Wave wave = audio_wave_load(file_name, arena);
+    Str8 result = audio_wave_export_to_str8(wave, name, wrap_size, arena);
     return result;
 }
 
-internal Audio_Sound audio_load_from_path(Arena *arena, Str8 path, Audio_Load_Flags flags)
+// ak: Wave Management
+//=============================================================================
+
+internal Audio_Wave audio_wave_load(Str8 file_name, Arena *arena)
 {
-    if (path.length == 0) { return audio_sound_zero(); }
-    
-    Audio_Sound result = audio_sound_zero();
-    if (flags & Audio_Load_Flag_Stream)
+    Audio_Wave wave = STRUCT_ZERO;
+    Arena_Temp scratch = arena_scratch_begin(NULL, 0);
+    U8Array file_data = fs_file_path_read_full(file_name, scratch.arena);
+    if (file_data.v != NULL)
     {
-        _Audio_Sound *_sound = _audio_state->free_sound;
-        if (_sound)
+        wave = audio_wave_load_from_memory(str8_skip_last_dot(file_name), file_data, arena);
+    arena_scratch_end(scratch);
+    }
+    return wave;
+}
+
+internal Audio_Wave audio_wave_load_from_memory(Str8 file_type, U8Array file_data, Arena *arena)
+{
+    Audio_Wave wave = STRUCT_ZERO;
+    
+    if (str8_match(file_type, str8(".wav"), Str_Match_Flag_CaseInsensitive))
+    {
+        drwav wav = STRUCT_ZERO;
+        bool success = drwav_init_memory(&wav, file_data.v, file_data.length, NULL);
+        if (success)
         {
-            SLLStackPop(_audio_state->free_sound);
+            wave.frame_count = (size_t)wav.totalPCMFrameCount;
+            wave.sample_rate = wav.sampleRate;
+            wave.sample_size = 16;
+            wave.channels = wav.channels;
+            wave.data = arena_push(arena, uint16_t, (size_t)wave.frame_count*wave.channels);
+            
+            // NOTE(ak): Forcing conversion to 16bit sample size on reading
+            drwav_read_pcm_frames_s16(&wav, wave.frame_count, (drwav_int16 *)wave.data);
         }
         else
         {
-            _sound = arena_push(_audio_state->arena, _Audio_Sound, 1);
+            LogWarnF(g_log, "Audio_Wave: Failed to load WAV data");
         }
+        drwav_uninit(&wav);
+    }
+    else if (str8_match(file_type, str8(".ogg"), Str_Match_Flag_CaseInsensitive))
+    {
+        stb_vorbis *ogg_data = stb_vorbis_open_memory(file_data.v, file_data.length, NULL, NULL);
+        if (ogg_data != NULL)
+        {
+            stb_vorbis_info info = stb_vorbis_get_info(ogg_data);
+
+            wave.sample_rate = info.sample_rate;
+            wave.sample_size = 16;       // By default, ogg data is 16 bit per sample (uint16_t)
+            wave.channels = info.channels;
+            wave.frame_count = stb_vorbis_stream_length_in_samples(ogg_data);  // NOTE(ak): It returns frames!
+            wave.data = arena_push(arena, uint16_t, (size_t)wave.frame_count*wave.channels);
+            // NOTE(ak): Get the number of samples to process (be careful! asking for number of shorts, not bytes!)
+            stb_vorbis_get_samples_short_interleaved(ogg_data, info.channels, (short *)wave.data, wave.frame_count*wave.channels);
+            stb_vorbis_close(ogg_data);
+        }
+        else
+        {
+            LogWarnF(g_log, "Audio_Wave: Failed to load OGG data");
+        }
+    }
+    else if (str8_match(file_type, str8(".mp3"), Str_Match_Flag_CaseInsensitive))
+    {
+        drmp3_config config = STRUCT_ZERO;
+        unsigned long long total_frame_count = 0;
+        // NOTE(ak): Forcing conversion to 32bit float sample size on reading
+        wave.data = drmp3_open_memory_and_read_pcm_frames_f32(file_data.v, file_data.length, &config, &total_frame_count, NULL);
+        wave.sample_size = 32;
         
-        _sound->in_use = true;
-        _sound->data   = StructZeroType(U8Array);
-        _sound->path   = str8_copy(_audio_state->arena, path);
-        _sound->flags  = flags;
+        if (wave.data != NULL)
+        {
+            wave.channels = config.channels;
+            wave.sample_rate = config.sampleRate;
+            wave.frame_count = (size_t)total_frame_count; // WARNING: Potential loss of data
+        }
+        else
+        {
+            LogWarnF(g_log, "Audio_Wave: Failed to load MP3 data");
+        }
+
+    }
+    else if (str8_match(file_type, str8(".qoa"), Str_Match_Flag_CaseInsensitive))
+    {
+        qoa_desc qoa = STRUCT_ZERO;
+        // NOTE(ak): Returned sample data is always 16 bit?
+        wave.data = qoa_decode(file_data.v, file_data.length, &qoa);
+        wave.sample_size = 16;
         
-        result = _audio_handle_from_sound(_sound);
+        if (wave.data != NULL)
+        {
+            wave.channels = qoa.channels;
+            wave.sample_rate = qoa.samplerate;
+            wave.frame_count = qoa.samples;
+        }
+        else
+        {
+            LogWarnF(g_log, "Audio_Wave: Failed to load QOA data");
+        }
+
+    }
+    else if (str8_match(file_type, str8(".flac"), Str_Match_Flag_CaseInsensitive))
+    {
+        unsigned long long total_frame_count = 0;
+        // NOTE(ak): Forcing conversion to 16bit sample size on reading
+        wave.data = drflac_open_memory_and_read_pcm_frames_s16(file_data.v, file_data.length, &wave.channels, &wave.sample_rate, &total_frame_count, NULL);
+        wave.sample_size = 16;
+        
+        if (wave.data != NULL)
+        {
+            wave.frame_count = (size_t)total_frame_count; // WARNING: Potential loss of data
+        }
+        else
+        {
+            LogWarnF(g_log, "Audio_Wave: Failed to load FLAC data");
+        }
     }
     else
     {
-        U8Array data = fs_file_path_read_full(path, arena);
-        result = audio_load_from_memory(data, flags);
+        LogWarnF(g_log, "Audio_Wave: Data format not supported");
     }
+    
+    LogInfoF(g_log, "Audio_Wave: Data loaded successfully (%i Hz, %i bit, %i channels)", wave.sample_rate, wave.sample_size, wave.channels);
+    
+    return wave;
+}
+
+internal bool audio_wave_is_valid(Audio_Wave wave)
+{
+    bool result = false;
+    
+    if ((wave.data != NULL) &&      // Validate wave data available
+        (wave.frame_count > 0) &&    // Validate frame count
+        (wave.sample_rate > 0) &&    // Validate sample rate is supported
+        (wave.sample_size > 0) &&    // Validate sample size is supported
+        (wave.channels > 0)) result = true; // Validate number of channels supported
+    
     return result;
 }
 
-internal void audio_unload(Audio_Sound sound)
+internal bool audio_wave_export(Audio_Wave wave, Str8 file_name)
 {
-    _Audio_Sound *_sound = _audio_sound_from_handle(sound);
-    if(_sound != 0)
+    bool result = false;
+    Str8 file_type = str8_skip_last_dot(file_name);
+    
+    if (str8_match(file_type, str8(".wav"), Str_Match_Flag_CaseInsensitive))
     {
-        ma_mutex_lock(&_audio_state->mutex);
-        _Audio_Voice *voice = _audio_state->active_voices_first;
-        while(voice != 0)
+        drwav wav = STRUCT_ZERO;
+        drwav_data_format format = STRUCT_ZERO;
+        format.container = drwav_container_riff;
+        if (wave.sample_size == 32) format.format = DR_WAVE_FORMAT_IEEE_FLOAT;
+        else format.format = DR_WAVE_FORMAT_PCM;
+        format.channels = wave.channels;
+        format.sampleRate = wave.sample_rate;
+        format.bitsPerSample = wave.sample_size;
+        
+        U8Array file_data = STRUCT_ZERO;
+        result = drwav_init_memory_write(&wav, (void**)&file_data.v, &file_data.size, &format, NULL);
+        if (result) result = (int32_t)drwav_write_pcm_frames(&wav, wave.frame_count, wave.data);
+        drwav_result result = drwav_uninit(&wav);
+        
+        if (result == DRWAV_SUCCESS)
         {
-            _Audio_Voice *next_voice = voice->next;
-            if(voice->sound.u64[0] == sound.u64[0])
-            {
-                DLLRemove(_audio_state->active_voices_first, _audio_state->active_voices_last, voice);
-                if(voice->decoder_valid)
-                {
-                    ma_decoder_uninit(&voice->decoder);
-                    voice->decoder_valid = false;
-                }
-                voice->state = _Audio_Voice_State_Inactive;
-                SLLStackPush(_audio_state->free_voice, voice);
-            }
-            voice = next_voice;
+            result = fs_file_path_write(file_name, file_data);
         }
         
-        _sound->in_use = false;
-        _sound->data = StructZeroType(U8Array);
-        _sound->path = StructZeroType(Str8);
-        _sound->flags = 0;
-        SLLStackPush(_audio_state->free_sound, _sound);
-        ma_mutex_unlock(&_audio_state->mutex);
+        drwav_free(file_data.v, NULL);
+    }
+    else if (str8_match(file_type, str8(".qoa"), Str_Match_Flag_CaseInsensitive))
+    {
+        if (wave.sample_size == 16)
+        {
+            qoa_desc qoa = STRUCT_ZERO;
+            qoa.channels = wave.channels;
+            qoa.samplerate = wave.sample_rate;
+            qoa.samples = wave.frame_count;
+            
+            int bytes_written = qoa_write((const char *)file_name.cstr, (const short *)wave.data, &qoa);
+            if (bytes_written > 0) result = true;
+        }
+        else
+        {
+            LogWarnF(g_log, "Audio: Wave data must be 16 bit per sample for QOA format export");
+        }
+    }
+    else if (str8_match(file_type, str8(".raw"), Str_Match_Flag_CaseInsensitive))
+    {
+        // ak: Export raw sample data (without header)
+        // NOTE(ak): It's up to the user to track wave parameters
+        result = fs_file_path_write(file_name, Array((uint8_t *)wave.data, wave.frame_count*wave.channels*wave.sample_size/8));
+    }
+    
+    if (result)
+    {
+        LogInfoF(g_log, "Audio_Wave: [%s] Wave data exported successfully", file_name);
+    }
+    else
+    {
+        LogWarnF(g_log, "Audio_Wave: [%s] Failed to export wave data", file_name);
+    }
+    
+    return result;
+}
+
+internal void audio_wave_format_convert(Audio_Wave *wave, uint32_t sample_rate, uint32_t sample_size, uint32_t channels, Arena *arena)
+{
+    // rjf: no-op if format already matches
+    if(wave->sample_rate == sample_rate &&
+        wave->sample_size == sample_size &&
+        wave->channels == channels)
+    {
+        return;
+    }
+    
+    ma_format format_in = ((wave->sample_size == 8)? ma_format_u8 : ((wave->sample_size == 16)? ma_format_s16 : ma_format_f32));
+    ma_format format_out = ((sample_size == 8)? ma_format_u8 : ((sample_size == 16)? ma_format_s16 : ma_format_f32));
+    
+    ma_uint32 frame_count_in = wave->frame_count;
+    ma_uint32 frame_count = (ma_uint32)ma_convert_frames(NULL, 0, format_out, channels, sample_rate, NULL, frame_count_in, format_in, wave->channels, wave->sample_rate);
+    
+    if (frame_count != 0)
+    {
+        size_t arena_pos_before_alloc = arena_pos(arena);
+        size_t data_size = frame_count*channels*(sample_size/8);
+        void *data = arena_push(arena, uint8_t, data_size);
+        frame_count = (ma_uint32)ma_convert_frames(data, frame_count, format_out, channels, sample_rate, wave->data, frame_count_in, format_in, wave->channels, wave->sample_rate);
+        if (frame_count == 0)
+        {
+            wave->frame_count = frame_count;
+            wave->sample_size = sample_size;
+            wave->sample_rate = sample_rate;
+            wave->channels = channels;
+            // TODO(ak): have to find a way to free before assigning new data
+            // free(wave->data);
+            wave->data = data;
+        } else {
+            arena_pop_to(arena, arena_pos_before_alloc);
+            LogWarnF(g_log, "Audio_Wave: Failed format conversion");
+        }
+
+    } else {
+        LogWarnF(g_log, "Audio_Wave: Failed to get frame count for format conversion");
     }
 }
 
-// ak: Voice Controls
+internal Audio_Wave audio_wave_copy(Audio_Wave wave, Arena *arena)
+{
+    Audio_Wave new_wave = STRUCT_ZERO;
+    size_t new_wave_data_size = wave.frame_count*wave.channels*wave.sample_size/8;
+    new_wave.data = arena_push(arena, uint8_t, new_wave_data_size);
+    if (new_wave.data != NULL)
+    {
+        // NOTE(ak): Size must be provided in bytes
+        mem_copy(new_wave.data, wave.data, new_wave_data_size);
+        new_wave.frame_count = wave.frame_count;
+        new_wave.sample_rate = wave.sample_rate;
+        new_wave.sample_size = wave.sample_size;
+        new_wave.channels = wave.channels;
+    }
+    return new_wave;
+}
+
+internal void audio_wave_crop(Audio_Wave *wave, size_t init_frame, size_t final_frame)
+{
+    if ((init_frame >= 0) &&
+        (init_frame < final_frame) &&
+        (final_frame <= wave->frame_count))
+    {
+        size_t bytes_per_frame = wave->channels * (wave->sample_size / 8);
+        size_t new_frame_count = final_frame - init_frame;
+        size_t data_size = new_frame_count * bytes_per_frame;
+        size_t offset = init_frame * bytes_per_frame;
+        mem_copy(wave->data, (uint8_t *)wave->data + offset, data_size);
+        wave->frame_count = new_frame_count;
+    }
+    else
+    {
+        LogWarnF(g_log, "Audio_Wave: Crop range out of bounds");
+    }
+}
+
+internal Str8 audio_wave_export_to_str8(Audio_Wave wave, Str8 name, size_t wrap_size, Arena *arena)
+{
+    Str8_List list = STRUCT_ZERO;
+    
+    size_t wave_data_size = wave.frame_count*wave.channels*wave.sample_size/8;
+    
+    // ak: uppercase copy of the variable name
+    Str8 var_name = str8_copy(arena, name);
+    for (size_t i = 0; i < var_name.size; i++)
+    {
+        if (var_name.cstr[i] >= 'a' && var_name.cstr[i] <= 'z') { var_name.cstr[i] -= 32; }
+    }
+    
+    // ak: wave information
+    str8_list_pushf(arena, &list, "#define %.*s_FRAME_COUNT      %lu\n",   str8_varg(var_name), wave.frame_count);
+    str8_list_pushf(arena, &list, "#define %.*s_SAMPLE_RATE      %u\n",    str8_varg(var_name), wave.sample_rate);
+    str8_list_pushf(arena, &list, "#define %.*s_SAMPLE_SIZE      %u\n",    str8_varg(var_name), wave.sample_size);
+    str8_list_pushf(arena, &list, "#define %.*s_CHANNELS         %u\n\n",  str8_varg(var_name), wave.channels);
+    
+    // ak: Wave data as an array: bytes for 8/16 bit, floats for 32 bit.
+    // Frame data is channel-interlaced: frame01[ch1, ch2, ...], frame02[], ...
+    if (wave.sample_size == 32)
+    {
+        size_t count = wave_data_size/4;
+        float *samples = (float *)wave.data;
+
+        str8_list_pushf(arena, &list, "global float %.*s_DATA[%lu] = {\n    ", str8_varg(var_name), (unsigned long)count);
+        for (size_t i = 0; i < count; i++)
+        {
+            bool last = (i == count - 1);
+            bool wrap = ((i + 1)%wrap_size == 0);
+            if (last)      str8_list_pushf(arena, &list, "%.4ff };\n",   samples[i]);
+            else if (wrap) str8_list_pushf(arena, &list, "%.4ff,\n    ", samples[i]);
+            else           str8_list_pushf(arena, &list, "%.4ff, ",      samples[i]);
+        }
+    }
+    else
+    {
+        size_t count = wave_data_size;
+        uint8_t *bytes = (uint8_t *)wave.data;
+
+        str8_list_pushf(arena, &list, "global uint8_t %.*s_DATA[%lu] = {\n    ", str8_varg(var_name), (unsigned long)count);
+        for (size_t i = 0; i < count; i++)
+        {
+            bool last = (i == count - 1);
+            bool wrap = ((i + 1)%wrap_size == 0);
+            if (last)      str8_list_pushf(arena, &list, "0x%x };\n",   bytes[i]);
+            else if (wrap) str8_list_pushf(arena, &list, "0x%x,\n    ", bytes[i]);
+            else           str8_list_pushf(arena, &list, "0x%x, ",      bytes[i]);
+        }
+    }
+    
+    return str8_list_join(arena, &list, NULL);
+}
+
+// ak: Samples Management =====================================================
+
+internal F32Array audio_samples_from_wave_load(Audio_Wave wave, Arena *arena)
+{
+    size_t sample_count = wave.frame_count * wave.channels;
+    F32Array samples = array_alloc(arena, F32Array, sample_count, sample_count);
+    for(size_t i = 0; i < samples.length; i += 1)
+    {
+        if(wave.sample_size == 8)
+        {
+            samples.v[i] = (float)(((uint32_t *)wave.data)[i] - 128) / 128.0f;
+        }
+        else if(wave.sample_size == 16)
+        {
+            samples.v[i] = (float)(((int16_t *)wave.data)[i]) / 32768.0f;
+        }
+        else if(wave.sample_size == 32)
+        {
+            samples.v[i] = ((float *)wave.data)[i];
+        }
+    }
+    return samples;
+}
+
+// ak: Sound Management
 //=============================================================================
 
-internal Audio_Voice audio_play_voice_from_sound(Audio_Sound sound, Audio_Play_Params params)
+internal Audio_Sound audio_sound_load(Str8 file_name, Arena *arena)
 {
-    _Audio_Sound *_sound = _audio_sound_from_handle(sound);
-    if(_sound == NULL || !_sound->in_use) { return audio_voice_zero(); }
-    
-    if (params.bus >= AUDIO_MAX_BUSES)
-    {
-        params.bus = 0;
-    }
-    if (_sound->flags & Audio_Load_Flag_Loop)
-    {
-        params.loop = true;
-    }
-    
-    ma_mutex_lock(&_audio_state->mutex);
-    
-    _Audio_Voice *voice = _audio_state->free_voice;
-    if (voice)
-    {
-        SLLStackPop(_audio_state->free_voice);
-    }
-    else
-    {
-        voice = arena_push(_audio_state->arena, _Audio_Voice, 1);
-    }
-    
-    ma_decoder_config config = ma_decoder_config_init(ma_format_f32, _audio_state->decoder.channels, _audio_state->decoder.sample_rate);
-    
-    ma_result decode_result;
-    if ((_sound->flags & Audio_Load_Flag_Stream) && _sound->path.cstr != NULL)
-    {
-        decode_result = ma_decoder_init_file((const char *)_sound->path.cstr, &config, &voice->decoder);
-    }
-    else
-    {
-        decode_result = ma_decoder_init_memory(_sound->data.v, _sound->data.length, &config, &voice->decoder);
-    }
-    
-    if(decode_result == MA_SUCCESS)
-    {
-        voice->decoder_valid = true;
-        voice->sound         = sound;
-        voice->params        = params;
-        voice->state         = _Audio_Voice_State_Playing;
-            
-        DLLPushBack(_audio_state->active_voices_first, _audio_state->active_voices_last, voice);
-    }
-    else
-    {
-        voice->decoder_valid = false;
-        SLLStackPush(_audio_state->free_voice, voice);
-        voice = NULL;
-    }
-    
-    ma_mutex_unlock(&_audio_state->mutex);
-    
-    return voice ? _audio_voice_handle_from_voice(voice) : audio_voice_zero();
+    Arena_Temp scratch = arena_scratch_begin(NULL, 0);
+    Audio_Wave wave = audio_wave_load(file_name, scratch.arena);
+    Audio_Sound sound = audio_sound_load_from_wave(wave, arena);
+    arena_scratch_end(scratch);
+    return sound;
 }
 
-internal bool audio_voice_is_alive(Audio_Voice voice)
+// Load sound from wave data
+// NOTE(ak): Wave data must be unallocated manually
+Audio_Sound audio_sound_load_from_wave(Audio_Wave wave, Arena *arena)
 {
-    _Audio_Voice *_voice = _audio_voice_from_handle(voice);
-    if (_voice == 0) { return false; }
-    
-    ma_mutex_lock(&_audio_state->mutex);
-    bool found = false;
-    for (_Audio_Voice *v = _audio_state->active_voices_first; v != 0; v = v->next)
+    Audio_Sound sound = STRUCT_ZERO;
+    if (wave.data != NULL)
     {
-        if (v == _voice)
+        // ak: When using miniaudio mixing needs to b done manually.
+        // To simplify this, the format of each sound needs to be converted to
+        // be consistent with the format used to open the playback
+        // _audio_state.device. It can be done in two ways:
+        //   1) Convert the whole sound in one go at load time (here)
+        //   2) Convert the audio data in chunks at mixing time
+        // First option has been selected, format conversion is done on the
+        // loading stage. The downside is that it uses more memory if the
+        // original sound is u8 or s16
+        ma_format format_in = ((wave.sample_size == 8)? ma_format_u8 : ((wave.sample_size == 16)? ma_format_s16 : ma_format_f32));
+        ma_uint32 frame_count_in = wave.frame_count;
+        
+        ma_uint32 frame_count = (ma_uint32)ma_convert_frames(NULL, 0, (ma_format)AUDIO_DEVICE_FORMAT, AUDIO_DEVICE_CHANNELS, _audio_state->system.device.sampleRate, NULL, frame_count_in, format_in, wave.channels, wave.sample_rate);
+        if (frame_count == 0)
         {
-            found = (v->state != _Audio_Voice_State_Inactive && v->decoder_valid);
-            break;
+            LogWarnF(g_log, "Audio_Sound: Failed to get frame count for format conversion");
         }
-    }
-    ma_mutex_unlock(&_audio_state->mutex);
-    return found;
-}
-
-internal bool audio_voice_is_playing(Audio_Voice voice)
-{
-    _Audio_Voice *_voice = _audio_voice_from_handle(voice);
-    if (_voice == 0) { return false; }
-    
-    ma_mutex_lock(&_audio_state->mutex);
-    bool playing = false;
-    for (_Audio_Voice *v = _audio_state->active_voices_first; v != 0; v = v->next)
-    {
-        if (v == _voice)
+        
+        Audio_Buffer *audio_buffer = audio_buffer_alloc(AUDIO_DEVICE_FORMAT, AUDIO_DEVICE_CHANNELS, _audio_state->system.device.sampleRate, frame_count, Audio_Buffer_Usage_Static, arena);
+        if (audio_buffer != NULL)
         {
-            playing = (v->state == _Audio_Voice_State_Playing);
-            break;
-        }
-    }
-    ma_mutex_unlock(&_audio_state->mutex);
-    return playing;
-}
-
-internal bool audio_voice_is_paused(Audio_Voice voice)
-{
-    _Audio_Voice *_voice = _audio_voice_from_handle(voice);
-    if (_voice == 0) { return false; }
-    
-    ma_mutex_lock(&_audio_state->mutex);
-    bool paused = false;
-    for (_Audio_Voice *v = _audio_state->active_voices_first; v != 0; v = v->next)
-    {
-        if (v == _voice)
-        {
-            paused = (v->state == _Audio_Voice_State_Paused);
-            break;
-        }
-    }
-    ma_mutex_unlock(&_audio_state->mutex);
-    return paused;
-}
-
-internal void audio_voice_pause(Audio_Voice voice)
-{
-    _Audio_Voice *_voice = _audio_voice_from_handle(voice);
-    if (_voice == 0) { return; }
-    
-    ma_mutex_lock(&_audio_state->mutex);
-    for (_Audio_Voice *v = _audio_state->active_voices_first; v != 0; v = v->next)
-    {
-        if (v == _voice)
-        {
-            if (v->state == _Audio_Voice_State_Playing)
+            frame_count = (ma_uint32)ma_convert_frames(audio_buffer->data, frame_count, (ma_format)AUDIO_DEVICE_FORMAT, AUDIO_DEVICE_CHANNELS, _audio_state->system.device.sampleRate, wave.data, frame_count_in, format_in, wave.channels, wave.sample_rate);
+            if (frame_count == 0)
             {
-                v->state = _Audio_Voice_State_Paused;
-            }
-            break;
-        }
-    }
-    ma_mutex_unlock(&_audio_state->mutex);
-}
-
-internal void audio_voice_resume(Audio_Voice voice)
-{
-    _Audio_Voice *_voice = _audio_voice_from_handle(voice);
-    if (_voice == 0) { return; }
-    
-    ma_mutex_lock(&_audio_state->mutex);
-    for (_Audio_Voice *v = _audio_state->active_voices_first; v != 0; v = v->next)
-    {
-        if (v == _voice)
-        {
-            if (v->state == _Audio_Voice_State_Paused)
-            {
-                v->state = _Audio_Voice_State_Playing;
-            }
-            break;
-        }
-    }
-    ma_mutex_unlock(&_audio_state->mutex);
-}
-
-internal void audio_voice_toggle_pause(Audio_Voice voice)
-{
-    _Audio_Voice *_voice = _audio_voice_from_handle(voice);
-    if (_voice == 0) { return; }
-    
-    ma_mutex_lock(&_audio_state->mutex);
-    for (_Audio_Voice *v = _audio_state->active_voices_first; v != 0; v = v->next)
-    {
-        if (v == _voice)
-        {
-            if (v->state == _Audio_Voice_State_Playing)
-            {
-                v->state = _Audio_Voice_State_Paused;
-            }
-            else if (v->state == _Audio_Voice_State_Paused)
-            {
-                v->state = _Audio_Voice_State_Playing;
-            }
-            break;
-        }
-    }
-    ma_mutex_unlock(&_audio_state->mutex);
-}
-
-internal void audio_voice_restart(Audio_Voice voice)
-{
-    _Audio_Voice *_voice = _audio_voice_from_handle(voice);
-    if (_voice == 0) { return; }
-    
-    ma_mutex_lock(&_audio_state->mutex);
-    for (_Audio_Voice *v = _audio_state->active_voices_first; v != 0; v = v->next)
-    {
-        if (v == _voice && v->decoder_valid)
-        {
-            ma_decoder_seek_to_pcm_frame(&v->decoder, 0);
-            v->state = _Audio_Voice_State_Playing;
-            break;
-        }
-    }
-    ma_mutex_unlock(&_audio_state->mutex);
-}
-
-internal void audio_voice_set_volume(Audio_Voice voice, float volume)
-{
-    _Audio_Voice *_voice = _audio_voice_from_handle(voice);
-    if (_voice == 0) { return; }
-    if (volume < 0.0f) volume = 0.0f;
-    if (volume > 1.0f) volume = 1.0f;
-    
-    ma_mutex_lock(&_audio_state->mutex);
-    for (_Audio_Voice *v = _audio_state->active_voices_first; v != 0; v = v->next)
-    {
-        if (v == _voice)
-        {
-            v->params.volume = volume;
-            break;
-        }
-    }
-    ma_mutex_unlock(&_audio_state->mutex);
-}
-
-internal float audio_voice_get_volume(Audio_Voice voice)
-{
-    if (_audio_state == 0) { return 0.0f; }
-    _Audio_Voice *_voice = _audio_voice_from_handle(voice);
-    if (_voice == 0) { return 0.0f; }
-    
-    ma_mutex_lock(&_audio_state->mutex);
-    float vol = 0.0f;
-    for (_Audio_Voice *v = _audio_state->active_voices_first; v != 0; v = v->next)
-    {
-        if (v == _voice)
-        {
-            vol = v->params.volume;
-            break;
-        }
-    }
-    ma_mutex_unlock(&_audio_state->mutex);
-    return vol;
-}
-
-internal double audio_voice_get_position_seconds(Audio_Voice voice)
-{
-    if (_audio_state == 0) { return 0.0; }
-    _Audio_Voice *_voice = _audio_voice_from_handle(voice);
-    if (_voice == 0) { return 0.0; }
-    
-    ma_mutex_lock(&_audio_state->mutex);
-    double pos = 0.0;
-    for (_Audio_Voice *v = _audio_state->active_voices_first; v != 0; v = v->next)
-    {
-        if (v == _voice && v->decoder_valid)
-        {
-            ma_uint64 cursor = 0;
-            if (ma_decoder_get_cursor_in_pcm_frames(&v->decoder, &cursor) == MA_SUCCESS)
-            {
-                ma_uint32 sample_rate = v->decoder.outputSampleRate ? v->decoder.outputSampleRate : _audio_state->decoder.sample_rate;
-                if (sample_rate > 0)
-                {
-                    pos = (double)cursor / (double)sample_rate;
-                }
-            }
-            break;
-        }
-    }
-    ma_mutex_unlock(&_audio_state->mutex);
-    return pos;
-}
-
-internal double audio_voice_get_duration_seconds(Audio_Voice voice)
-{
-    if (_audio_state == 0) { return 0.0; }
-    _Audio_Voice *_voice = _audio_voice_from_handle(voice);
-    if (_voice == 0) { return 0.0; }
-    
-    ma_mutex_lock(&_audio_state->mutex);
-    double dur = 0.0;
-    for (_Audio_Voice *v = _audio_state->active_voices_first; v != 0; v = v->next)
-    {
-        if (v == _voice && v->decoder_valid)
-        {
-            ma_uint64 length = 0;
-            if (ma_decoder_get_length_in_pcm_frames(&v->decoder, &length) == MA_SUCCESS)
-            {
-                ma_uint32 sample_rate = v->decoder.outputSampleRate ? v->decoder.outputSampleRate : _audio_state->decoder.sample_rate;
-                if (sample_rate > 0)
-                {
-                    dur = (double)length / (double)sample_rate;
-                }
-            }
-            break;
-        }
-    }
-    ma_mutex_unlock(&_audio_state->mutex);
-    return dur;
-}
-
-internal bool audio_voice_seek_seconds(Audio_Voice voice, double seconds)
-{
-    _Audio_Voice *_voice = _audio_voice_from_handle(voice);
-    if (_voice == 0) { return false; }
-    
-    ma_mutex_lock(&_audio_state->mutex);
-    bool success = false;
-    for (_Audio_Voice *v = _audio_state->active_voices_first; v != 0; v = v->next)
-    {
-        if (v == _voice && v->decoder_valid)
-        {
-            ma_uint32 sample_rate = v->decoder.outputSampleRate ? v->decoder.outputSampleRate : _audio_state->decoder.sample_rate;
-            ma_uint64 total_frames = 0;
-            ma_decoder_get_length_in_pcm_frames(&v->decoder, &total_frames);
-            
-            if (seconds < 0.0) seconds = 0.0;
-            ma_uint64 target_frame = (ma_uint64)(seconds * (double)sample_rate);
-            if (total_frames > 0 && target_frame >= total_frames)
-            {
-                target_frame = (total_frames > 0) ? total_frames - 1 : 0;
+                LogWarnF(g_log, "Audio_Sound: Failed format conversion");
             }
             
-            ma_result res = ma_decoder_seek_to_pcm_frame(&v->decoder, target_frame);
-            success = (res == MA_SUCCESS);
-            break;
+            sound.frame_count = frame_count;
+            sound.stream.sample_rate = _audio_state->system.device.sampleRate;
+            sound.stream.sample_size = 32;
+            sound.stream.channels = AUDIO_DEVICE_CHANNELS;
+            sound.stream.buffer = audio_buffer;
         }
-    }
-    ma_mutex_unlock(&_audio_state->mutex);
-    return success;
-}
-
-internal void audio_voice_set_pitch(Audio_Voice voice, float pitch)
-{
-    _Audio_Voice *_voice = _audio_voice_from_handle(voice);
-    if (_voice == 0) { return; }
-    if (pitch < 0.0f) pitch = 0.0f;
-    
-    ma_mutex_lock(&_audio_state->mutex);
-    for (_Audio_Voice *v = _audio_state->active_voices_first; v != 0; v = v->next)
-    {
-        if (v == _voice)
+        else
         {
-            v->params.pitch = pitch;
-            break;
+            LogWarnF(g_log, "Audio_Sound: Failed to create buffer");
         }
     }
-    ma_mutex_unlock(&_audio_state->mutex);
+    return sound;
 }
 
-internal float audio_voice_get_pitch(Audio_Voice voice)
+internal void audio_sound_unload(Audio_Sound sound)
 {
-    if (_audio_state == 0) { return 1.0f; }
-    _Audio_Voice *_voice = _audio_voice_from_handle(voice);
-    if (_voice == 0) { return 1.0f; }
-    
-    ma_mutex_lock(&_audio_state->mutex);
-    float pitch = 1.0f;
-    for (_Audio_Voice *v = _audio_state->active_voices_first; v != 0; v = v->next)
-    {
-        if (v == _voice)
-        {
-            pitch = v->params.pitch;
-            break;
-        }
-    }
-    ma_mutex_unlock(&_audio_state->mutex);
-    return pitch;
+    audio_buffer_free(sound.stream.buffer);
+    LogInfoF(g_log, "Audio_Sound: Unloaded sound data from RAM");
 }
 
-internal void audio_voice_set_pan(Audio_Voice voice, float pan)
+// ak: Load sound alias, clone sound from existing sound data, clone does not own wave data
+// NOTE(ak): Wave data must be unallocated manually and will be shared across all clones
+Audio_Sound audio_sound_alias_load(Audio_Sound source, Arena *arena)
 {
-    _Audio_Voice *_voice = _audio_voice_from_handle(voice);
-    if (_voice == 0) { return; }
-    if (pan < -1.0f) pan = -1.0f;
-    if (pan > 1.0f)  pan = 1.0f;
-    
-    ma_mutex_lock(&_audio_state->mutex);
-    for (_Audio_Voice *v = _audio_state->active_voices_first; v != 0; v = v->next)
+    Audio_Sound sound = STRUCT_ZERO;
+    if (source.stream.buffer->data != NULL)
     {
-        if (v == _voice)
+        Audio_Buffer *audio_buffer = audio_buffer_alloc(AUDIO_DEVICE_FORMAT, AUDIO_DEVICE_CHANNELS, _audio_state->system.device.sampleRate, 0, Audio_Buffer_Usage_Static, arena);
+        if (audio_buffer != NULL)
         {
-            v->params.pan = pan;
-            break;
+            audio_buffer->size_in_frames = source.stream.buffer->size_in_frames;
+            audio_buffer->data = source.stream.buffer->data;
+            
+            // Initalize the buffer as if it was new
+            audio_buffer->volume = 1.0f;
+            audio_buffer->pitch = 1.0f;
+            audio_buffer->pan = 0.0f; // Center
+            
+            sound.frame_count = source.frame_count;
+            sound.stream.sample_rate = _audio_state->system.device.sampleRate;
+            sound.stream.sample_size = 32;
+            sound.stream.channels = AUDIO_DEVICE_CHANNELS;
+            sound.stream.buffer = audio_buffer;
+        }
+        else
+        {
+            LogWarnF(g_log, "Audio_Sound: Failed to create buffer");
         }
     }
-    ma_mutex_unlock(&_audio_state->mutex);
+    
+    return sound;
 }
 
-internal float audio_voice_get_pan(Audio_Voice voice)
+internal void audio_sound_alias_unload(Audio_Sound alias)
 {
-    if (_audio_state == 0) { return 0.0f; }
-    _Audio_Voice *_voice = _audio_voice_from_handle(voice);
-    if (_voice == 0) { return 0.0f; }
-    
-    ma_mutex_lock(&_audio_state->mutex);
-    float pan = 0.0f;
-    for (_Audio_Voice *v = _audio_state->active_voices_first; v != 0; v = v->next)
+    // ak: Untrack and unload the sound buffer, not the sample data, it is shared with the source for the alias
+    if (alias.stream.buffer != NULL)
     {
-        if (v == _voice)
-        {
-            pan = v->params.pan;
-            break;
-        }
+        audio_buffer_untrack(alias.stream.buffer);
+        ma_data_converter_uninit(&alias.stream.buffer->converter, NULL);
+        // TODO(ak): find a way to free converterResidual
+        // free(alias.stream.buffer->converterResidual);
+        audio_buffer_free(alias.stream.buffer);
     }
-    ma_mutex_unlock(&_audio_state->mutex);
-    return pan;
 }
 
-internal void audio_voice_set_bus(Audio_Voice voice, uint32_t bus)
+// Check if sound is valid (data loaded and buffers initialized)
+internal bool audio_sound_is_valid(Audio_Sound sound)
 {
-    _Audio_Voice *_voice = _audio_voice_from_handle(voice);
-    if (_voice == 0 || bus >= AUDIO_MAX_BUSES) { return; }
+    bool result = false;
     
-    ma_mutex_lock(&_audio_state->mutex);
-    for (_Audio_Voice *v = _audio_state->active_voices_first; v != 0; v = v->next)
+    if ((sound.frame_count > 0) &&        // Validate frame count
+        (sound.stream.buffer != NULL) &&  // Validate stream buffer
+        (sound.stream.sample_rate > 0) && // Validate sample rate is supported
+        (sound.stream.sample_size > 0) && // Validate sample size is supported
+        (sound.stream.channels > 0))      // Validate number of channels supported
     {
-        if (v == _voice)
-        {
-            v->params.bus = bus;
-            break;
-        }
+        result = true;
     }
-    ma_mutex_unlock(&_audio_state->mutex);
+    
+    return result;
 }
 
-internal uint32_t audio_voice_get_bus(Audio_Voice voice)
+// ak: Update sound buffer with new data
+// PARAMS: [data], format must match sound.stream.sample_size, default 32 bit float - stereo
+// PARAMS: [frame_count] must not exceed sound.frame_count
+internal void audio_sound_update(Audio_Sound sound, const void *data, size_t frame_count)
 {
-    _Audio_Voice *_voice = _audio_voice_from_handle(voice);
-    if (_voice == 0) { return 0; }
-    
-    ma_mutex_lock(&_audio_state->mutex);
-    uint32_t bus = 0;
-    for (_Audio_Voice *v = _audio_state->active_voices_first; v != 0; v = v->next)
+    if (sound.stream.buffer != NULL)
     {
-        if (v == _voice)
-        {
-            bus = v->params.bus;
-            break;
-        }
+        audio_buffer_stop(sound.stream.buffer);
+
+        mem_copy(sound.stream.buffer->data, data, frame_count*ma_get_bytes_per_frame(sound.stream.buffer->converter.formatIn, sound.stream.buffer->converter.channelsIn));
     }
-    ma_mutex_unlock(&_audio_state->mutex);
-    return bus;
 }
 
-
-internal void audio_voice_set_play_params(Audio_Voice voice, Audio_Play_Params params)
+internal void audio_sound_play(Audio_Sound sound)
 {
-    _Audio_Voice *_voice = _audio_voice_from_handle(voice);
-    if (_voice == 0) { return; }
-    
-    ma_mutex_lock(&_audio_state->mutex);
-    for (_Audio_Voice *v = _audio_state->active_voices_first; v != 0; v = v->next)
-    {
-        if (v == _voice)
-        {
-            v->params = params;
-            break;
-        }
-    }
-    ma_mutex_unlock(&_audio_state->mutex);
+    audio_buffer_play(sound.stream.buffer);
 }
 
-internal Audio_Play_Params audio_voice_get_play_params(Audio_Voice voice)
+internal void audio_sound_pause(Audio_Sound sound)
 {
-    _Audio_Voice *_voice = _audio_voice_from_handle(voice);
-    if (_voice == 0) { return StructZeroType(Audio_Play_Params); }
-    
-    ma_mutex_lock(&_audio_state->mutex);
-    Audio_Play_Params params = STRUCT_ZERO;
-    for (_Audio_Voice *v = _audio_state->active_voices_first; v != 0; v = v->next)
-    {
-        if (v == _voice)
-        {
-            params = v->params;
-            break;
-        }
-    }
-    ma_mutex_unlock(&_audio_state->mutex);
-    return params;
+    audio_buffer_pause(sound.stream.buffer);
 }
 
-// ak: Bus Controls
+internal void audio_sound_resume(Audio_Sound sound)
+{
+    audio_buffer_resume(sound.stream.buffer);
+}
+
+internal void audio_sound_stop(Audio_Sound sound)
+{
+    audio_buffer_stop(sound.stream.buffer);
+}
+
+internal bool audio_sound_is_playing(Audio_Sound sound)
+{
+    return audio_buffer_is_playing(sound.stream.buffer);
+}
+
+internal void audio_sound_volume_set(Audio_Sound sound, float volume)
+{
+    audio_buffer_volume_set(sound.stream.buffer, volume);
+}
+
+internal void audio_sound_pitch_set(Audio_Sound sound, float pitch)
+{
+    audio_buffer_pitch_set(sound.stream.buffer, pitch);
+}
+
+internal void audio_sound_pan_set(Audio_Sound sound, float pan)
+{
+    audio_buffer_pan_set(sound.stream.buffer, pan);
+}
+
+// ak: Music Management
 //=============================================================================
 
-internal void audio_bus_set_volume(uint32_t bus, float volume)
+internal Audio_Music audio_music_load(Str8 file_name, Arena *arena)
 {
-    if (bus >= AUDIO_MAX_BUSES) { return; }
-    if (volume < 0.0f) volume = 0.0f;
+    Audio_Music music = STRUCT_ZERO;
+    bool music_loaded = false;
+    size_t arena_pos = arena->pos;
+    Str8 file_type = str8_skip_last_dot(file_name);
     
-    ma_mutex_lock(&_audio_state->mutex);
-    _audio_state->buses[bus].volume = volume;
-    ma_mutex_unlock(&_audio_state->mutex);
-}
-
-internal float audio_bus_get_volume(uint32_t bus)
-{
-    if (bus >= AUDIO_MAX_BUSES) { return 0.0f; }
-    
-    ma_mutex_lock(&_audio_state->mutex);
-    float vol = _audio_state->buses[bus].volume;
-    ma_mutex_unlock(&_audio_state->mutex);
-    return vol;
-}
-
-internal void audio_bus_set_pitch(uint32_t bus, float pitch)
-{
-    if (bus >= AUDIO_MAX_BUSES) { return; }
-    if (pitch < 0.0f) pitch = 0.0f;
-    
-    ma_mutex_lock(&_audio_state->mutex);
-    _audio_state->buses[bus].pitch = pitch;
-    ma_mutex_unlock(&_audio_state->mutex);
-}
-
-internal float audio_bus_get_pitch(uint32_t bus)
-{
-    if (bus >= AUDIO_MAX_BUSES) { return 1.0f; }
-    
-    ma_mutex_lock(&_audio_state->mutex);
-    float pitch = _audio_state->buses[bus].pitch;
-    ma_mutex_unlock(&_audio_state->mutex);
-    return pitch;
-}
-
-internal void audio_bus_set_pan(uint32_t bus, float pan)
-{
-    if (bus >= AUDIO_MAX_BUSES) { return; }
-    if (pan < -1.0f) pan = -1.0f;
-    if (pan > 1.0f)  pan = 1.0f;
-    
-    ma_mutex_lock(&_audio_state->mutex);
-    _audio_state->buses[bus].pan = pan;
-    ma_mutex_unlock(&_audio_state->mutex);
-}
-
-internal float audio_bus_get_pan(uint32_t bus)
-{
-    if (bus >= AUDIO_MAX_BUSES) { return 0.0f; }
-    
-    ma_mutex_lock(&_audio_state->mutex);
-    float pan = _audio_state->buses[bus].pan;
-    ma_mutex_unlock(&_audio_state->mutex);
-    return pan;
-}
-
-internal void audio_bus_pause(uint32_t bus)
-{
-    if (bus >= AUDIO_MAX_BUSES) { return; }
-    
-    ma_mutex_lock(&_audio_state->mutex);
-    _audio_state->buses[bus].paused = true;
-    ma_mutex_unlock(&_audio_state->mutex);
-}
-
-internal void audio_bus_resume(uint32_t bus)
-{
-    if (bus >= AUDIO_MAX_BUSES) { return; }
-    
-    ma_mutex_lock(&_audio_state->mutex);
-    _audio_state->buses[bus].paused = false;
-    ma_mutex_unlock(&_audio_state->mutex);
-}
-
-internal void audio_bus_toggle_pause(uint32_t bus)
-{
-    if (bus >= AUDIO_MAX_BUSES) { return; }
-    
-    ma_mutex_lock(&_audio_state->mutex);
-    _audio_state->buses[bus].paused = !_audio_state->buses[bus].paused;
-    ma_mutex_unlock(&_audio_state->mutex);
-}
-
-internal bool audio_bus_is_paused(uint32_t bus)
-{
-    if (bus >= AUDIO_MAX_BUSES) { return false; }
-    
-    ma_mutex_lock(&_audio_state->mutex);
-    bool paused = _audio_state->buses[bus].paused;
-    ma_mutex_unlock(&_audio_state->mutex);
-    return paused;
-}
-
-internal void audio_bus_stop(uint32_t bus)
-{
-    if (bus >= AUDIO_MAX_BUSES) { return; }
-    
-    ma_mutex_lock(&_audio_state->mutex);
-    _Audio_Voice *voice = _audio_state->active_voices_first;
-    while(voice != 0)
+    if (str8_match(file_type, str8(".wav"), Str_Match_Flag_CaseInsensitive))
     {
-        _Audio_Voice *next_voice = voice->next;
-        if(voice->params.bus == bus)
+        drwav *context = arena_push(arena, drwav, 1);
+        bool success = drwav_init_file(context, (const char *)file_name.cstr, NULL);
+        
+        if (success)
         {
-            DLLRemove(_audio_state->active_voices_first, _audio_state->active_voices_last, voice);
-            if(voice->decoder_valid)
+            music.context_type = Audio_Music_Context_Type_Wav;
+            music.context_data = context;
+            uint32_t sample_size = context->bitsPerSample;
+            if (context->bitsPerSample == 24) sample_size = 16; // Forcing conversion to s16 on audio_music_update()
+
+            music.stream = audio_stream_load(context->sampleRate, sample_size, context->channels, arena);
+            music.frame_count = (size_t)context->totalPCMFrameCount;
+            music.looping = true;   // Looping enabled by default
+            music_loaded = true;
+        }
+        else
+        {
+            arena_pop_to(arena, arena_pos);
+        }
+    }
+    else if (str8_match(file_type, str8(".ogg"), Str_Match_Flag_CaseInsensitive))
+    {
+        stb_vorbis *context = stb_vorbis_open_filename((const char *)file_name.cstr, NULL, NULL);
+
+        if (context != NULL)
+        {
+            music.context_type = Audio_Music_Context_Type_Ogg;
+            music.context_data = context;
+            stb_vorbis_info info = stb_vorbis_get_info((stb_vorbis *)music.context_data);
+            // ak: OGG bit rate defaults to 16 bit, it's enough for compressed format
+            music.stream = audio_stream_load(info.sample_rate, 16, info.channels, arena);
+
+            // WARNING(ak): It seems this function returns length in frames, not samples, so multiply by channels
+            music.frame_count = stb_vorbis_stream_length_in_samples((stb_vorbis *)music.context_data);
+            music.looping = true; // Looping enabled by default
+            music_loaded = true;
+        }
+        else
+        {
+            stb_vorbis_close(context);
+        }
+    }
+    else if (str8_match(file_type, str8(".mp3"), Str_Match_Flag_CaseInsensitive))
+    {
+        drmp3 *context = arena_push(arena, drmp3, 1);
+        drmp3_bool32 result = drmp3_init_file(context, (const char *)file_name.cstr, NULL);
+        if (result > 0)
+        {
+            music.context_type = Audio_Music_Context_Type_Mp3;
+            music.context_data = context;
+            music.stream = audio_stream_load(context->sampleRate, 32, context->channels, arena);
+            music.frame_count = (size_t)drmp3_get_pcm_frame_count(context);
+            music.looping = true;   // Looping enabled by default
+            music_loaded = true;
+        }
+        else
+        {
+            arena_pop_to(arena, arena_pos);
+        }
+    }
+    else if (str8_match(file_type, str8(".qoa"), Str_Match_Flag_CaseInsensitive))
+    {
+        qoaplay_desc *context = qoaplay_open((const char *)file_name.cstr);
+        if (context != NULL)
+        {
+            music.context_type = Audio_Music_Context_Type_Qoa;
+            music.context_data = context;
+            // NOTE(ak): Loading samples as 32bit float normalized data, so,
+            // configure the output audio stream to also use float 32bit
+            music.stream = audio_stream_load(context->info.samplerate, 32, context->info.channels, arena);
+            music.frame_count = context->info.samples;
+            music.looping = true;   // Looping enabled by default
+            music_loaded = true;
+        }
+        else
+        {
+            //ak: no uninit required
+        }
+    }
+    else if (str8_match(file_type, str8(".flac"), Str_Match_Flag_CaseInsensitive))
+    {
+        drflac *context = drflac_open_file((const char *)file_name.cstr, NULL);
+
+        if (context != NULL)
+        {
+            music.context_type = Audio_Music_Context_Type_Flac;
+            music.context_data = context;
+            uint32_t sample_size = context->bitsPerSample;
+            if (context->bitsPerSample == 24) sample_size = 16;   // Forcing conversion to s16 on audio_music_update()
+            music.stream = audio_stream_load(context->sampleRate, sample_size, context->channels, arena);
+            music.frame_count = (size_t)context->totalPCMFrameCount;
+            music.looping = true;   // Looping enabled by default
+            music_loaded = true;
+        }
+        else
+        {
+            drflac_free(context, NULL);
+        }
+    }
+    else
+    {
+        LogWarnF(g_log, "Audio_Stream: [%s] File format not supported", file_name);
+    }
+
+    if (!music_loaded)
+    {
+        LogWarnF(g_log, "Audio_Stream: [%s] Music file could not be opened", file_name);
+    }
+    else
+    {
+        // Show some music stream info
+        LogInfoF(g_log, "Audio_Music: [%s] Music file loaded successfully", file_name);
+        LogInfoF(g_log, "    > Sample rate:   %i Hz", music.stream.sample_rate);
+        LogInfoF(g_log, "    > Sample size:   %i bits", music.stream.sample_size);
+        LogInfoF(g_log, "    > Channels:      %i (%s)", music.stream.channels, (music.stream.channels == 1)? "Mono" : (music.stream.channels == 2)? "Stereo" : "Multi");
+        LogInfoF(g_log, "    > Total frames:  %i", music.frame_count);
+    }
+    
+    return music;
+}
+
+// Load music stream from memory buffer, file_type refers to extension: i.e. ".wav"
+// WARNING: File extension must be provided in lower-case
+internal Audio_Music audio_music_from_memory_load(Str8 file_type, const uint8_t *data, size_t data_size, Arena *arena)
+{
+    Audio_Music music = STRUCT_ZERO;
+    bool music_loaded = false;
+    size_t arena_pos = arena->pos;
+    
+    if (str8_match(file_type, str8(".wav"), Str_Match_Flag_CaseInsensitive))
+    {
+        drwav *context = arena_push(arena, drwav, 1);
+        bool success = drwav_init_memory(context, (const void *)data, data_size, NULL);
+        
+        if (success)
+        {
+            music.context_type = Audio_Music_Context_Type_Wav;
+            music.context_data = context;
+            uint32_t sample_size = context->bitsPerSample;
+            if (context->bitsPerSample == 24) sample_size = 16;   // Forcing conversion to s16 on audio_music_update()
+
+            music.stream = audio_stream_load(context->sampleRate, sample_size, context->channels, arena);
+            music.frame_count = (size_t)context->totalPCMFrameCount;
+            music.looping = true;   // Looping enabled by default
+            music_loaded = true;
+        }
+        else
+        {
+            drwav_uninit(context);
+            arena_pop_to(arena, arena_pos);
+        }
+    }
+    else if (str8_match(file_type, str8(".ogg"), Str_Match_Flag_CaseInsensitive))
+    {
+        stb_vorbis *context = stb_vorbis_open_memory(data, data_size, NULL, NULL);
+
+        if (context != NULL)
+        {
+            music.context_type = Audio_Music_Context_Type_Ogg;
+            music.context_data = context;
+            stb_vorbis_info info = stb_vorbis_get_info((stb_vorbis *)music.context_data);  // Get Ogg file info
+
+            // ak: OGG bit rate defaults to 16 bit, it's enough for compressed format
+            music.stream = audio_stream_load(info.sample_rate, 16, info.channels, arena);
+
+            // WARNING(ak): It seems this function returns length in frames, not samples, so multiply by channels
+            music.frame_count = stb_vorbis_stream_length_in_samples((stb_vorbis *)music.context_data);
+            music.looping = true;   // Looping enabled by default
+            music_loaded = true;
+        }
+        else
+        {
+            stb_vorbis_close(context);
+        }
+    }
+    else if (str8_match(file_type, str8(".mp3"), Str_Match_Flag_CaseInsensitive))
+    {
+        drmp3 *context = arena_push(arena, drmp3, 1);
+        drmp3_bool32 success = drmp3_init_memory(context, (const void *)data, data_size, NULL);
+
+        if (success)
+        {
+            music.context_type = Audio_Music_Context_Type_Mp3;
+            music.context_data = context;
+            music.stream = audio_stream_load(context->sampleRate, 32, context->channels, arena);
+            music.frame_count = (size_t)drmp3_get_pcm_frame_count(context);
+            music.looping = true;   // Looping enabled by default
+            music_loaded = true;
+        }
+        else
+        {
+            drmp3_uninit(context);
+            arena_pop_to(arena, arena_pos);
+        }
+    }
+    else if (str8_match(file_type, str8(".qoa"), Str_Match_Flag_CaseInsensitive))
+    {
+        qoaplay_desc *context = NULL;
+        if ((data != NULL) && (data_size > 0))
+        {
+            context = qoaplay_open_memory(data, data_size);
+        }
+        if (context != NULL)
+        {
+            music.context_type = Audio_Music_Context_Type_Qoa;
+            music.context_data = context;
+            
+            // NOTE(ak): Loading samples are 32bit float normalized data, so,
+            // configure the output audio stream to also use float 32bit
+            music.stream = audio_stream_load(context->info.samplerate, 32, context->info.channels, arena);
+            music.frame_count = context->info.samples;
+            music.looping = true;   // Looping enabled by default
+            music_loaded = true;
+        }
+        else{
+            // ak: no uninit required
+        }
+    }
+    else if (str8_match(file_type, str8(".flac"), Str_Match_Flag_CaseInsensitive))
+    {
+        drflac *context = drflac_open_memory((const void *)data, data_size, NULL);
+
+        if (context != NULL)
+        {
+            music.context_type = Audio_Music_Context_Type_Flac;
+            music.context_data = context;
+            uint32_t sample_size = context->bitsPerSample;
+            if (context->bitsPerSample == 24) sample_size = 16;   // Forcing conversion to s16 on audio_music_update()
+            music.stream = audio_stream_load(context->sampleRate, sample_size, context->channels, arena);
+            music.frame_count = (size_t)context->totalPCMFrameCount;
+            music.looping = true;   // Looping enabled by default
+            music_loaded = true;
+        }
+        else
+        {
+            drflac_free(context, NULL);
+        }
+    }
+    else LogWarnF(g_log, "Audio_Stream: Data format not supported");
+
+    if (!music_loaded)
+    {
+        LogWarnF(g_log, "Audio_Stream: Music data could not be loaded");
+    }
+    else
+    {
+        LogInfoF(g_log, "Audio_Music: Music data loaded successfully");
+        LogInfoF(g_log, "    > Sample rate:   %i Hz", music.stream.sample_rate);
+        LogInfoF(g_log, "    > Sample size:   %i bits", music.stream.sample_size);
+        LogInfoF(g_log, "    > Channels:      %i (%s)", music.stream.channels, (music.stream.channels == 1)? "Mono" : (music.stream.channels == 2)? "Stereo" : "Multi");
+        LogInfoF(g_log, "    > Total frames:  %i", music.frame_count);
+    }
+    
+    return music;
+}
+
+internal void audio_music_unload(Audio_Music music)
+{
+    if (audio_music_is_playing(music)) { audio_music_stop(music); }
+    audio_stream_unload(music.stream);
+    if (music.context_data != NULL)
+    {
+        if (music.context_type == Audio_Music_Context_Type_Wav)
+        {
+            drwav_uninit((drwav *)music.context_data);
+            // free(music.context_data);
+        }
+        else if (music.context_type == Audio_Music_Context_Type_Ogg)
+        {
+            stb_vorbis_close((stb_vorbis *)music.context_data);
+        }
+        else if (music.context_type == Audio_Music_Context_Type_Mp3)
+        {
+            drmp3_uninit((drmp3 *)music.context_data);
+            // free(music.context_data);
+        }
+        else if (music.context_type == Audio_Music_Context_Type_Qoa)
+        {
+            qoaplay_close((qoaplay_desc *)music.context_data);
+        }
+        else if (music.context_type == Audio_Music_Context_Type_Flac)
+        {
+            drflac_close((drflac *)music.context_data);
+        }
+    }
+}
+
+bool audio_music_is_valid(Audio_Music music)
+{
+    return ((music.context_data != NULL)   && // Validate context loaded
+            (music.frame_count > 0)        && // Validate audio frame count
+            (music.stream.sample_rate > 0) && // Validate sample rate is supported
+            (music.stream.sample_size > 0) && // Validate sample size is supported
+            (music.stream.channels > 0));     // Validate number of channels supported
+}
+
+internal void audio_music_play(Audio_Music music)
+{
+    audio_stream_play(music.stream);
+}
+
+internal void audio_music_pause(Audio_Music music)
+{
+    audio_stream_pause(music.stream);
+}
+
+internal void audio_music_resume(Audio_Music music)
+{
+    audio_stream_resume(music.stream);
+}
+
+internal void audio_music_stop(Audio_Music music)
+{
+    audio_stream_stop(music.stream);
+
+    switch (music.context_type)
+    {
+        case Audio_Music_Context_Type_None: break;
+        case Audio_Music_Context_Type_Wav:  drwav_seek_to_first_pcm_frame((drwav *)music.context_data); break;
+        case Audio_Music_Context_Type_Ogg:  stb_vorbis_seek_start((stb_vorbis *)music.context_data); break;
+        case Audio_Music_Context_Type_Mp3:  drmp3_seek_to_start_of_stream((drmp3 *)music.context_data); break;
+        case Audio_Music_Context_Type_Qoa:  qoaplay_rewind((qoaplay_desc *)music.context_data); break;
+        case Audio_Music_Context_Type_Flac: drflac__seek_to_first_frame((drflac *)music.context_data); break;
+    }
+}
+
+internal void audio_music_seek(Audio_Music music, float position)
+{
+    uint32_t position_in_frames = (uint32_t)(position*music.stream.sample_rate);
+    
+    switch (music.context_type)
+    {
+        case Audio_Music_Context_Type_None: break;
+        case Audio_Music_Context_Type_Wav: drwav_seek_to_pcm_frame((drwav *)music.context_data, position_in_frames); break;
+        case Audio_Music_Context_Type_Ogg: stb_vorbis_seek_frame((stb_vorbis *)music.context_data, position_in_frames); break;
+        case Audio_Music_Context_Type_Mp3: drmp3_seek_to_pcm_frame((drmp3 *)music.context_data, position_in_frames); break;
+        case Audio_Music_Context_Type_Qoa:
+        {
+            int32_t qoaFrame = position_in_frames/QOA_FRAME_LEN;
+            qoaplay_seek_frame((qoaplay_desc *)music.context_data, qoaFrame); // Seeks to QOA frame, not PCM frame
+
+            // ak: Compute QOA frame number and update position_in_frames
+            position_in_frames = ((qoaplay_desc *)music.context_data)->sample_position;
+        } break;
+        case Audio_Music_Context_Type_Flac: drflac_seek_to_pcm_frame((drflac *)music.context_data, position_in_frames); break;
+    }
+    
+    ma_mutex_lock(&_audio_state->system.lock);
+    music.stream.buffer->frames_processed = position_in_frames;
+    music.stream.buffer->is_sub_buffer_processed[0] = true;
+    music.stream.buffer->is_sub_buffer_processed[1] = true;
+    ma_mutex_unlock(&_audio_state->system.lock);
+}
+
+// ak: update (re-fill) music buffers if data already processed
+internal void audio_music_update(Audio_Music music)
+{
+    if (music.stream.buffer == NULL) return;
+    if (!music.stream.buffer->playing) return;
+    
+    ma_mutex_lock(&_audio_state->system.lock);
+    
+    uint32_t sub_buffer_size_in_frames = music.stream.buffer->size_in_frames/2;
+    
+    // ak: on first call of this function, lazily pre-allocated a temp buffer to read audio files/memory data in
+    size_t frame_size = music.stream.channels*music.stream.sample_size/8;
+    size_t pcm_size = sub_buffer_size_in_frames*frame_size;
+    
+    if (_audio_state->system.pcm.arena == NULL)
+    {
+        _audio_state->system.pcm.arena = arena_alloc();
+    }
+    if (_audio_state->system.pcm.buffer_size < pcm_size && _audio_state->system.pcm.arena != NULL)
+    {
+        arena_clear(_audio_state->system.pcm.arena);
+        _audio_state->system.pcm.buffer = arena_push(_audio_state->system.pcm.arena, uint8_t, pcm_size);
+        _audio_state->system.pcm.buffer_size = pcm_size;
+    }
+    
+    // ak: check both sub-buffers to check if they require refilling
+    for (size_t i = 0; i < 2; i++)
+    {
+        uint32_t framesLeft = music.frame_count - music.stream.buffer->frames_processed;  // Frames left to be processed
+        uint32_t framesToStream = 0;                 // Total frames to be streamed
+        
+        if ((framesLeft >= sub_buffer_size_in_frames) || music.looping) framesToStream = sub_buffer_size_in_frames;
+        else framesToStream = framesLeft;
+        
+        if (framesToStream == 0)
+        {
+            // ak: check if both buffers have been processed
+            if (music.stream.buffer->is_sub_buffer_processed[0] && music.stream.buffer->is_sub_buffer_processed[1])
             {
-                ma_decoder_uninit(&voice->decoder);
-                voice->decoder_valid = false;
+                ma_mutex_unlock(&_audio_state->system.lock);
+                audio_music_stop(music);
+                return;
             }
-            voice->state = _Audio_Voice_State_Inactive;
-            SLLStackPush(_audio_state->free_voice, voice);
+            ma_mutex_unlock(&_audio_state->system.lock);
+            return;
         }
-        voice = next_voice;
+        
+        if (!music.stream.buffer->is_sub_buffer_processed[i]) continue; // No refilling required, move to next sub-buffer
+        
+        size_t frame_count_still_needed = framesToStream;
+        size_t frame_count_read_total = 0;
+        
+        switch (music.context_type)
+        {
+            case Audio_Music_Context_Type_None: {}break;
+            case Audio_Music_Context_Type_Wav:
+            {
+                if (music.stream.sample_size == 16)
+                {
+                    while (true)
+                    {
+                        size_t frame_count_read = (size_t)drwav_read_pcm_frames_s16((drwav *)music.context_data, frame_count_still_needed, (short *)((char *)_audio_state->system.pcm.buffer + frame_count_read_total*frame_size));
+                        frame_count_read_total += frame_count_read;
+                        frame_count_still_needed -= frame_count_read;
+                        if (frame_count_still_needed == 0) break;
+                        else drwav_seek_to_first_pcm_frame((drwav *)music.context_data);
+                    }
+                }
+                else if (music.stream.sample_size == 32)
+                {
+                    while (true)
+                    {
+                        size_t frame_count_read = (size_t)drwav_read_pcm_frames_f32((drwav *)music.context_data, frame_count_still_needed, (float *)((char *)_audio_state->system.pcm.buffer + frame_count_read_total*frame_size));
+                        frame_count_read_total += frame_count_read;
+                        frame_count_still_needed -= frame_count_read;
+                        if (frame_count_still_needed == 0) break;
+                        else drwav_seek_to_first_pcm_frame((drwav *)music.context_data);
+                    }
+                }
+            } break;
+            case Audio_Music_Context_Type_Ogg:
+            {
+                while (true)
+                {
+                    size_t frame_count_read = stb_vorbis_get_samples_short_interleaved((stb_vorbis *)music.context_data, music.stream.channels, (short *)((char *)_audio_state->system.pcm.buffer + frame_count_read_total*frame_size), frame_count_still_needed*music.stream.channels);
+                    frame_count_read_total += frame_count_read;
+                    frame_count_still_needed -= frame_count_read;
+                    if (frame_count_still_needed == 0) break;
+                    else stb_vorbis_seek_start((stb_vorbis *)music.context_data);
+                }
+            } break;
+            case Audio_Music_Context_Type_Mp3:
+            {
+                while (true)
+                {
+                    size_t frame_count_read = (size_t)drmp3_read_pcm_frames_f32((drmp3 *)music.context_data, frame_count_still_needed, (float *)((char *)_audio_state->system.pcm.buffer + frame_count_read_total*frame_size));
+                    frame_count_read_total += frame_count_read;
+                    frame_count_still_needed -= frame_count_read;
+                    if (frame_count_still_needed == 0) break;
+                    else drmp3_seek_to_start_of_stream((drmp3 *)music.context_data);
+                }
+            } break;
+            case Audio_Music_Context_Type_Qoa:
+            {
+                size_t frame_count_read = qoaplay_decode((qoaplay_desc *)music.context_data, (float *)_audio_state->system.pcm.buffer, framesToStream);
+                frame_count_read_total += frame_count_read;
+            } break;
+            case Audio_Music_Context_Type_Flac:
+            {
+                while (true)
+                {
+                    size_t frame_count_read = (size_t)drflac_read_pcm_frames_s16((drflac *)music.context_data, frame_count_still_needed, (short *)((char *)_audio_state->system.pcm.buffer + frame_count_read_total*frame_size));
+                    frame_count_read_total += frame_count_read;
+                    frame_count_still_needed -= frame_count_read;
+                    if (frame_count_still_needed == 0) break;
+                    else drflac__seek_to_first_frame((drflac *)music.context_data);
+                }
+            } break;
+        }
+        
+        audio_stream_update_in_locked_state(music.stream, _audio_state->system.pcm.buffer, framesToStream);
     }
-    ma_mutex_unlock(&_audio_state->mutex);
+
+    ma_mutex_unlock(&_audio_state->system.lock);
 }
 
-internal void audio_bus_restart(uint32_t bus)
+internal bool audio_music_is_playing(Audio_Music music)
 {
-    if (bus >= AUDIO_MAX_BUSES) { return; }
-    
-    ma_mutex_lock(&_audio_state->mutex);
-    for (_Audio_Voice *v = _audio_state->active_voices_first; v != 0; v = v->next)
+    return audio_stream_is_playing(music.stream);
+}
+
+internal void audio_music_volume_set(Audio_Music music, float volume)
+{
+    audio_stream_volume_set(music.stream, volume);
+}
+
+internal void audio_music_pitch_set(Audio_Music music, float pitch)
+{
+    audio_buffer_pitch_set(music.stream.buffer, pitch);
+}
+
+internal void audio_music_pan_set(Audio_Music music, float pan)
+{
+    audio_buffer_pan_set(music.stream.buffer, pan);
+}
+
+internal float audio_music_duration_get(Audio_Music music)
+{
+    float totalSeconds = (float)music.frame_count/music.stream.sample_rate;
+    return totalSeconds;
+}
+
+internal float audio_music_time_played_get(Audio_Music music)
+{
+    float seconds_played = 0.0f;
+    if (music.stream.buffer != NULL)
     {
-        if (v->params.bus == bus && v->decoder_valid)
+        ma_mutex_lock(&_audio_state->system.lock);
+        uint64_t frames_processed = (uint64_t)music.stream.buffer->frames_processed;
+        size_t sub_buffer_size = (size_t)music.stream.buffer->size_in_frames/2;
+        uint64_t frames_in_first_buffer = music.stream.buffer->is_sub_buffer_processed[0]? 0 : sub_buffer_size;
+        uint64_t frames_in_second_buffer = music.stream.buffer->is_sub_buffer_processed[1]? 0 : sub_buffer_size;
+        uint64_t frames_in_buffers = frames_in_first_buffer + frames_in_second_buffer;
+        if (((uint32_t)frames_in_buffers > music.frame_count) && !music.looping) frames_in_buffers = music.frame_count;
+        uint64_t frames_sent_to_mix = music.stream.buffer->frame_cursor_pos%sub_buffer_size;
+        uint64_t frames_played = (frames_processed - frames_in_buffers + frames_sent_to_mix)%(size_t)music.frame_count;
+        if (frames_played < 0) frames_played += music.frame_count;
+        seconds_played = (float)frames_played/music.stream.sample_rate;
+        ma_mutex_unlock(&_audio_state->system.lock);
+    }
+    
+    return seconds_played;
+}
+
+// ak: Audio Stream Management
+//=============================================================================
+
+// Load audio stream (to stream audio pcm data)
+Audio_Stream audio_stream_load(uint32_t sample_rate, uint32_t sample_size, uint32_t channels, Arena *arena)
+{
+    Audio_Stream stream = STRUCT_ZERO;
+
+    stream.sample_rate = sample_rate;
+    stream.sample_size = sample_size;
+    stream.channels = channels;
+
+    Audio_Format format_in = ((stream.sample_size == 8)? Audio_Format_U8 : ((stream.sample_size == 16)? Audio_Format_S16 : Audio_Format_F32));
+
+    // The size of a streaming buffer must be at least double the size of a period
+    size_t periodSize = _audio_state->system.device.playback.internalPeriodSizeInFrames;
+
+    // If the buffer is not set, compute one that would give us a buffer good enough for a decent frame rate at the device bit size/rate
+    int32_t device_bits_per_sample = _audio_state->system.device.playback.format;
+    if (device_bits_per_sample > 4)  device_bits_per_sample = 4;
+    device_bits_per_sample *= _audio_state->system.device.playback.channels;
+
+    size_t sub_buffer_size = (_audio_state->buffer.default_size == 0)? (_audio_state->system.device.sampleRate/30*device_bits_per_sample) : _audio_state->buffer.default_size;
+
+    if (sub_buffer_size < periodSize) sub_buffer_size = periodSize;
+
+    // Create a double audio buffer of defined size
+    stream.buffer = audio_buffer_alloc(format_in, stream.channels, stream.sample_rate, sub_buffer_size*2, Audio_Buffer_Usage_Stream, arena);
+
+    if (stream.buffer != NULL)
+    {
+        stream.buffer->looping = true;    // Always loop for streaming buffers
+        LogInfoF(g_log, "Audio_Stream: Initialized successfully (%i Hz, %i bit, %s)", stream.sample_rate, stream.sample_size, (stream.channels == 1)? "Mono" : "Stereo");
+    }
+    else LogWarnF(g_log, "Audio_Stream: Failed to load audio buffer, stream could not be created");
+
+    return stream;
+}
+
+internal bool audio_stream_is_valid(Audio_Stream stream)
+{
+    return ((stream.buffer != NULL) &&    // Validate stream buffer
+            (stream.sample_rate > 0) &&    // Validate sample rate is supported
+            (stream.sample_size > 0) &&    // Validate sample size is supported
+            (stream.channels > 0));       // Validate number of channels supported
+}
+
+internal void audio_stream_unload(Audio_Stream stream)
+{
+    audio_buffer_free(stream.buffer);
+    LogInfoF(g_log, "Audio_Stream: Unloaded audio stream data from RAM");
+}
+
+// ak: Update audio stream buffers with data
+// NOTE 1: Only updates one buffer of the stream source: dequeue -> update -> queue
+// NOTE 2: To dequeue a buffer it needs to be processed: IsAudioStreamProcessed()
+internal void audio_stream_update(Audio_Stream stream, const void *data, size_t frame_count)
+{
+    ma_mutex_lock(&_audio_state->system.lock);
+    audio_stream_update_in_locked_state(stream, data, frame_count);
+    ma_mutex_unlock(&_audio_state->system.lock);
+}
+
+internal void audio_stream_update_in_locked_state(Audio_Stream stream, const void *data, size_t frame_count)
+{
+    if (stream.buffer != NULL)
+    {
+        if (stream.buffer->is_sub_buffer_processed[0] || stream.buffer->is_sub_buffer_processed[1])
         {
-            ma_decoder_seek_to_pcm_frame(&v->decoder, 0);
-            v->state = _Audio_Voice_State_Playing;
+            ma_uint32 sub_buffer_to_update = 0;
+
+            if (stream.buffer->is_sub_buffer_processed[0] && stream.buffer->is_sub_buffer_processed[1])
+            {
+                // ak: both buffers are available for updating
+                // Update the first one and make sure the cursor is moved back to the front
+                sub_buffer_to_update = 0;
+                stream.buffer->frame_cursor_pos = 0;
+            }
+            else
+            {
+                // ak: update whichever sub-buffer is processed
+                sub_buffer_to_update = (stream.buffer->is_sub_buffer_processed[0])? 0 : 1;
+            }
+            
+            ma_uint32 suf_buffer_size_in_frames = stream.buffer->size_in_frames/2;
+            uint8_t *sub_buffer = stream.buffer->data + ((suf_buffer_size_in_frames*stream.channels*(stream.sample_size/8))*sub_buffer_to_update);
+            
+            stream.buffer->frames_processed += frame_count;
+            
+            // ak: does this API expect a whole buffer to be updated in one go?
+            // Assuming so, but if not will need to change this logic
+            if (suf_buffer_size_in_frames >= (ma_uint32)frame_count)
+            {
+                ma_uint32 framesToWrite = (ma_uint32)frame_count;
+                ma_uint32 bytesToWrite = framesToWrite*stream.channels*(stream.sample_size/8);
+                memcpy(sub_buffer, data, bytesToWrite);
+                // ak: Any leftover frames should be filled with zeros
+                ma_uint32 leftoverFrameCount = suf_buffer_size_in_frames - framesToWrite;
+                if (leftoverFrameCount > 0) memset(sub_buffer + bytesToWrite, 0, leftoverFrameCount*stream.channels*(stream.sample_size/8));
+
+                stream.buffer->is_sub_buffer_processed[sub_buffer_to_update] = false;
+            }
+            else
+            {
+                LogWarnF(g_log, "Audio_Stream: Attempting to write too many frames to buffer");
+            }
+        }
+        else {
+            LogWarnF(g_log, "Audio_Stream: Buffer not available for updating");
         }
     }
-    ma_mutex_unlock(&_audio_state->mutex);
+}
+
+// Check if any audio stream buffers requires refill
+bool audio_stream_is_processed(Audio_Stream stream)
+{
+    bool result = false;
+
+    if (stream.buffer != NULL)
+    {
+        ma_mutex_lock(&_audio_state->system.lock);
+        result = stream.buffer->is_sub_buffer_processed[0] || stream.buffer->is_sub_buffer_processed[1];
+        ma_mutex_unlock(&_audio_state->system.lock);
+    }
+
+    return result;
+}
+
+internal void audio_stream_play(Audio_Stream stream)
+{
+    audio_buffer_play(stream.buffer);
+}
+
+internal void audio_stream_pause(Audio_Stream stream)
+{
+    audio_buffer_pause(stream.buffer);
+}
+
+internal void audio_stream_resume(Audio_Stream stream)
+{
+    audio_buffer_resume(stream.buffer);
+}
+
+internal bool audio_stream_is_playing(Audio_Stream stream)
+{
+    return audio_buffer_is_playing(stream.buffer);
+}
+
+internal void audio_stream_stop(Audio_Stream stream)
+{
+    audio_buffer_stop(stream.buffer);
+}
+
+// Set volume for audio stream (1.0 is max level)
+internal void audio_stream_volume_set(Audio_Stream stream, float volume)
+{
+    audio_buffer_volume_set(stream.buffer, volume);
+}
+
+// Set pitch for audio stream (1.0 is base level)
+internal void audio_stream_pitch_set(Audio_Stream stream, float pitch)
+{
+    audio_buffer_pitch_set(stream.buffer, pitch);
+}
+
+// Set pan for audio stream
+internal void audio_stream_pan_set(Audio_Stream stream, float pan)
+{
+    audio_buffer_pan_set(stream.buffer, pan);
+}
+
+// Default size for new audio streams
+internal void audio_stream_buffer_size_default_set(size_t size)
+{
+    _audio_state->buffer.default_size = size;
+}
+
+// Audio thread callback to request new data
+internal void audio_stream_callback_set(Audio_Stream stream, Audio_Callback callback)
+{
+    if (stream.buffer != NULL)
+    {
+        ma_mutex_lock(&_audio_state->system.lock);
+        stream.buffer->callback = callback;
+        ma_mutex_unlock(&_audio_state->system.lock);
+    }
+}
+
+// ak: Add processor to audio stream. Contrary to buffers, the order of processors is important
+// The new processor must be added at the end. As there aren't supposed to be a lot of processors attached to
+// a given stream, iterate through the list to find the end. That way there is no need to keep a pointer to the last element
+internal void audio_stream_process_attach(Audio_Stream stream, Audio_Callback process)
+{
+    ma_mutex_lock(&_audio_state->system.lock);
+    
+    Audio_Processor *processor = _audio_state->processor_free;
+    if (processor)
+    {
+        SLLStackPop(_audio_state->processor_free);
+    }
+    else
+    {
+        processor = arena_push(_audio_state->arena, Audio_Processor, 1);
+    }
+    
+    processor->process = process;
+    Audio_Processor *last = stream.buffer->processor;
+    while (last && last->next)
+    {
+        last = last->next;
+    }
+    if (last)
+    {
+        processor->prev = last;
+        last->next = processor;
+    }
+    else
+    {
+        stream.buffer->processor = processor;
+    }
+    
+    ma_mutex_unlock(&_audio_state->system.lock);
+}
+
+internal void audio_stream_process_detach(Audio_Stream stream, Audio_Callback process)
+{
+    ma_mutex_lock(&_audio_state->system.lock);
+    
+    Audio_Processor *processor = stream.buffer->processor;
+    while (processor)
+    {
+        Audio_Processor *next = processor->next;
+        Audio_Processor *prev = processor->prev;
+        if (processor->process == process)
+        {
+            if (stream.buffer->processor == processor) stream.buffer->processor = next;
+            if (prev) prev->next = next;
+            if (next) next->prev = prev;
+            
+            SLLStackPush(_audio_state->processor_free, processor);
+        }
+        processor = next;
+    }
+    
+    ma_mutex_unlock(&_audio_state->system.lock);
+}
+
+internal void audio_processor_mixed_attach(Audio_Callback process)
+{
+    ma_mutex_lock(&_audio_state->system.lock);
+    
+    Audio_Processor *processor = _audio_state->processor_free;
+    if (processor)
+    {
+        SLLStackPop(_audio_state->processor_free);
+    }
+    else
+    {
+        processor = arena_push(_audio_state->arena, Audio_Processor, 1);
+    }
+    
+    processor->process = process;
+    Audio_Processor *last = _audio_state->processor_mixed;
+    while (last && last->next)
+    {
+        last = last->next;
+    }
+    if (last)
+    {
+        processor->prev = last;
+        last->next = processor;
+    }
+    else _audio_state->processor_mixed = processor;
+    
+    ma_mutex_unlock(&_audio_state->system.lock);
+}
+
+internal void audio_processor_mixed_detach(Audio_Callback process)
+{
+    ma_mutex_lock(&_audio_state->system.lock);
+    
+    Audio_Processor *processor = _audio_state->processor_mixed;
+    while (processor)
+    {
+        Audio_Processor *next = processor->next;
+        Audio_Processor *prev = processor->prev;
+        if (processor->process == process)
+        {
+            if (_audio_state->processor_mixed == processor) _audio_state->processor_mixed = next;
+            if (prev) prev->next = next;
+            if (next) next->prev = prev;
+            
+            SLLStackPush(_audio_state->processor_free, processor);
+        }
+        processor = next;
+    }
+    
+    ma_mutex_unlock(&_audio_state->system.lock);
+}
+
+// ak: Audio Buffer Managment
+//=============================================================================
+
+internal Audio_Buffer *audio_buffer_alloc(Audio_Format format, uint32_t channels, uint32_t sample_rate, ma_uint64 size_in_frames, Audio_Buffer_Usage usage, Arena *arena)
+{
+    Audio_Buffer *buffer = _audio_state->buffer.free;
+    if (buffer)
+    {
+        SLLStackPop(_audio_state->buffer.free);
+    }
+    else
+    {
+        buffer = arena_push(_audio_state->arena, Audio_Buffer, 1);
+    }
+    
+    if (size_in_frames > 0)
+    {
+        buffer->data = arena_push(arena, uint8_t, size_in_frames*channels*ma_get_bytes_per_sample((ma_format)format));
+    }
+    
+    // ak: Audio data runs through a format converter
+    ma_data_converter_config converterConfig = ma_data_converter_config_init((ma_format)format, (ma_format)AUDIO_DEVICE_FORMAT, channels, AUDIO_DEVICE_CHANNELS, sample_rate, _audio_state->system.device.sampleRate);
+    converterConfig.allowDynamicSampleRate = true;
+    
+    ma_result result = ma_data_converter_init(&converterConfig, NULL, &buffer->converter);
+    if (result == MA_SUCCESS)
+    {
+        // ak: A cache for use by the converter is necessary when resampling because
+        // when generating output frames a different number of input frames will
+        // be consumed. Any residual input frames need to be kept track of to
+        // ensure there are no discontinuities. Since raylib supports pitch
+        // shifting, which is done through resampling, a cache will always be
+        // required. This will be kept relatively small to avoid too much wastage
+        buffer->converter_residual_count = 0;
+        size_t bytes_per_frame = ma_get_bytes_per_frame((ma_format)format, channels);
+        size_t converter_residual_size = AUDIO_BUFFER_RESIDUAL_CAPACITY*bytes_per_frame;
+        buffer->converter_residual = arena_push(arena, uint8_t, converter_residual_size);
+        
+        // ak: Init audio buffer values
+        buffer->volume = 1.0f;
+        buffer->pitch = 1.0f;
+        buffer->pan = 0.0f; // Center
+        
+        buffer->callback = NULL;
+        buffer->processor = NULL;
+        
+        buffer->playing = false;
+        buffer->paused = false;
+        buffer->looping = false;
+        
+        buffer->usage = usage;
+        buffer->frame_cursor_pos = 0;
+        buffer->frames_processed = 0;
+        buffer->size_in_frames = size_in_frames;
+        
+        // ak: Buffers should be marked as processed by default so that a call to
+        // audio_stream_update() immediately after initialization works correctly
+        buffer->is_sub_buffer_processed[0] = true;
+        buffer->is_sub_buffer_processed[1] = true;
+        
+        // ak: Track audio buffer to linked list next position
+        audio_buffer_track(buffer);
+    }
+    else
+    {
+        LogWarnF(g_log, "Audio_Buffer: Failed to create data conversion pipeline");
+        audio_buffer_free(buffer);
+    }
+    return buffer;
+}
+
+internal void audio_buffer_free(Audio_Buffer *buffer)
+{
+    if (buffer != NULL)
+    {
+        SLLStackPush(_audio_state->buffer.free, buffer);
+        audio_buffer_untrack(buffer);
+        ma_data_converter_uninit(&buffer->converter, NULL);
+    }
+}
+
+internal void audio_buffer_track(Audio_Buffer *buffer)
+{
+    ma_mutex_lock(&_audio_state->system.lock);
+    {
+        if (_audio_state->buffer.first == NULL)
+        {
+            _audio_state->buffer.first = buffer;
+        }
+        else
+        {
+            _audio_state->buffer.last->next = buffer;
+            buffer->prev = _audio_state->buffer.last;
+        }
+
+        _audio_state->buffer.last = buffer;
+    }
+    ma_mutex_unlock(&_audio_state->system.lock);
+}
+
+internal void audio_buffer_untrack(Audio_Buffer *buffer)
+{
+    if (buffer != NULL)
+    {
+        ma_mutex_lock(&_audio_state->system.lock);
+        DLLRemove_NPZ(0, _audio_state->buffer.first, _audio_state->buffer.last, buffer, next, prev);
+        buffer->prev = 0;
+        buffer->next = 0;
+        ma_mutex_unlock(&_audio_state->system.lock);
+    }
+}
+
+internal void audio_buffer_play(Audio_Buffer *buffer)
+{
+    if (buffer != NULL)
+    {
+        ma_mutex_lock(&_audio_state->system.lock);
+        buffer->playing = true;
+        buffer->paused = false;
+        buffer->frame_cursor_pos = 0;
+        buffer->frames_processed = 0;
+        buffer->is_sub_buffer_processed[0] = true;
+        buffer->is_sub_buffer_processed[1] = true;
+        ma_mutex_unlock(&_audio_state->system.lock);
+    }
+}
+
+internal bool audio_buffer_is_playing(Audio_Buffer *buffer)
+{
+    bool result = false;
+    ma_mutex_lock(&_audio_state->system.lock);
+    result = audio_buffer_is_playing_in_locked_state(buffer);
+    ma_mutex_unlock(&_audio_state->system.lock);
+    return result;
+}
+internal bool audio_buffer_is_playing_in_locked_state(Audio_Buffer *buffer)
+{
+    bool result = false;
+    if (buffer != NULL) result = (buffer->playing && !buffer->paused);
+    return result;
+}
+
+internal void audio_buffer_stop(Audio_Buffer *buffer)
+{
+    ma_mutex_lock(&_audio_state->system.lock);
+    audio_buffer_stop_in_locked_state(buffer);
+    ma_mutex_unlock(&_audio_state->system.lock);
+}
+internal void audio_buffer_stop_in_locked_state(Audio_Buffer *buffer)
+{
+    if (buffer != NULL)
+    {
+        if (audio_buffer_is_playing_in_locked_state(buffer))
+        {
+            buffer->playing = false;
+            buffer->paused = false;
+            buffer->frame_cursor_pos = 0;
+            buffer->frames_processed = 0;
+            buffer->is_sub_buffer_processed[0] = true;
+            buffer->is_sub_buffer_processed[1] = true;
+        }
+    }
+}
+
+internal void audio_buffer_pause(Audio_Buffer *buffer)
+{
+    if (buffer != NULL)
+    {
+        ma_mutex_lock(&_audio_state->system.lock);
+        buffer->paused = true;
+        ma_mutex_unlock(&_audio_state->system.lock);
+    }
+}
+
+internal void audio_buffer_resume(Audio_Buffer *buffer)
+{
+    if (buffer != NULL)
+    {
+        ma_mutex_lock(&_audio_state->system.lock);
+        buffer->paused = false;
+        ma_mutex_unlock(&_audio_state->system.lock);
+    }
+}
+
+internal void audio_buffer_volume_set(Audio_Buffer *buffer, float volume)
+{
+    if (buffer != NULL)
+    {
+        ma_mutex_lock(&_audio_state->system.lock);
+        buffer->volume = volume;
+        ma_mutex_unlock(&_audio_state->system.lock);
+    }
+}
+
+internal void audio_buffer_pitch_set(Audio_Buffer *buffer, float pitch)
+{
+    if ((buffer != NULL) && (pitch > 0.0f))
+    {
+        ma_mutex_lock(&_audio_state->system.lock);
+        // ak: Pitching is an adjustment of the sample rate
+        // Note that this changes the duration of the sound:
+        //  - higher pitches will make the sound faster
+        //  - lower pitches make it slower
+        ma_uint32 outputSampleRate = (ma_uint32)((float)_audio_state->system.device.sampleRate/pitch);
+        ma_data_converter_set_rate(&buffer->converter, buffer->converter.sampleRateIn, outputSampleRate);
+        buffer->pitch = pitch;
+        ma_mutex_unlock(&_audio_state->system.lock);
+    }
+}
+
+internal void audio_buffer_pan_set(Audio_Buffer *buffer, float pan)
+{
+    if (pan < -1.0f) pan = -1.0f;
+    else if (pan > 1.0f) pan = 1.0f;
+
+    if (buffer != NULL)
+    {
+        ma_mutex_lock(&_audio_state->system.lock);
+        buffer->pan = pan;
+        ma_mutex_unlock(&_audio_state->system.lock);
+    }
+}
+
+internal uint32_t audio_buffer_read_frames_in_internal_format(Audio_Buffer *buffer, void *frames_out, uint32_t frame_count)
+{
+    // ak: Don't read anything if the sound is not playing
+    if (!buffer->playing) return 0;
+    
+    // ak: Using audio buffer callback
+    if(buffer->callback != 0)
+    {
+        buffer->callback(frames_out, frame_count);
+        buffer->frames_processed += frame_count;
+        return frame_count;
+    }
+    
+    ma_uint32 sub_buffer_size_in_frames = (buffer->size_in_frames > 1)? buffer->size_in_frames/2 : buffer->size_in_frames;
+    ma_uint32 current_sub_buffer_index = buffer->frame_cursor_pos/sub_buffer_size_in_frames;
+    
+    if (current_sub_buffer_index > 1) return 0;
+    
+    // ak: Another thread can update the processed state of buffers, so
+    // take a copy here to try and avoid potential synchronization problems
+    bool is_sub_buffer_processed[2] = STRUCT_ZERO;
+    is_sub_buffer_processed[0] = buffer->is_sub_buffer_processed[0];
+    is_sub_buffer_processed[1] = buffer->is_sub_buffer_processed[1];
+    ma_uint32 frame_size_in_bytes = ma_get_bytes_per_frame(buffer->converter.formatIn, buffer->converter.channelsIn);
+    
+    // Fill out every frame until a buffer that's marked as processed is found, then fill the remainder with 0
+    ma_uint32 frames_read = 0;
+    while (1)
+    {
+        // ak: Break from this loop differently depending on the buffer's usage
+        //  - For static buffers, simply fill as much data as possible
+        //  - For streaming buffers, only fill half of the buffer that are processed
+        //    Unprocessed halves must keep their audio data in-tact
+        if (buffer->usage == Audio_Buffer_Usage_Static)
+        {
+            if (frames_read >= frame_count) break;
+        }
+        else
+        {
+            if (is_sub_buffer_processed[current_sub_buffer_index]) break;
+        }
+        
+        ma_uint32 total_frames_remaining = (frame_count - frames_read);
+        if (total_frames_remaining == 0) break;
+        
+        ma_uint32 framesRemainingInOutputBuffer;
+        if (buffer->usage == Audio_Buffer_Usage_Static)
+        {
+            framesRemainingInOutputBuffer = buffer->size_in_frames - buffer->frame_cursor_pos;
+        }
+        else
+        {
+            ma_uint32 firstFrameIndexOfThisSubBuffer = sub_buffer_size_in_frames*current_sub_buffer_index;
+            framesRemainingInOutputBuffer = sub_buffer_size_in_frames - (buffer->frame_cursor_pos - firstFrameIndexOfThisSubBuffer);
+        }
+        
+        ma_uint32 framesToRead = total_frames_remaining;
+        if (framesToRead > framesRemainingInOutputBuffer) framesToRead = framesRemainingInOutputBuffer;
+        
+        mem_copy((uint8_t *)frames_out + (frames_read*frame_size_in_bytes), buffer->data + (buffer->frame_cursor_pos*frame_size_in_bytes), framesToRead*frame_size_in_bytes);
+        buffer->frame_cursor_pos = (buffer->frame_cursor_pos + framesToRead)%buffer->size_in_frames;
+        frames_read += framesToRead;
+        
+        // ak: If the end of the buffer is read, mark it as processed
+        if (framesToRead == framesRemainingInOutputBuffer)
+        {
+            buffer->is_sub_buffer_processed[current_sub_buffer_index] = true;
+            is_sub_buffer_processed[current_sub_buffer_index] = true;
+            current_sub_buffer_index = (current_sub_buffer_index + 1)%2;
+            
+            // ak: Break from this loop if looping not enabled
+            if (!buffer->looping)
+            {
+                audio_buffer_stop_in_locked_state(buffer);
+                break;
+            }
+        }
+    }
+    
+    // ak: Zero-fill excess
+    ma_uint32 total_frames_remaining = (frame_count - frames_read);
+    if (total_frames_remaining > 0)
+    {
+        memset((uint8_t *)frames_out + (frames_read*frame_size_in_bytes), 0, total_frames_remaining*frame_size_in_bytes);
+        
+        // ak: For static buffers, fill the remaining frames with silence for
+        // safety, but don't report those frames as "read"; The reason for this
+        // is that the caller uses the return value to know whether a
+        // non-looping sound has finished playback
+        if (buffer->usage != Audio_Buffer_Usage_Static) frames_read += total_frames_remaining;
+    }
+    
+    return frames_read;
+}
+
+// ak: Reads audio data from an Audio_Buffer object in device format, returned data will be in a format appropriate for mixing
+internal uint32_t audio_buffer_read_frames_in_mixing_format(Audio_Buffer *buffer, float *frames_out, uint32_t frame_count)
+{
+    // NOTE(ak): Continuously converting data from the Audio_Buffer's internal format
+    // to the mixing format, which should be defined by the output format of the
+    // data converter. This is done until frame_count frames have been output.
+    ma_uint32 bpf = ma_get_bytes_per_frame(buffer->converter.formatIn, buffer->converter.channelsIn);
+    ma_uint8 input_buffer[4096] = STRUCT_ZERO;
+    ma_uint32 inputBufferFrameCap = sizeof(input_buffer)/bpf;
+    ma_uint32 total_output_frames_processed = 0;
+    
+    while (total_output_frames_processed < frame_count)
+    {
+        float *runningFramesOut = frames_out + (total_output_frames_processed*buffer->converter.channelsOut);
+        ma_uint64 outputFramesToProcessThisIteration = frame_count - total_output_frames_processed;
+        
+        // ak: process any residual input frames from the previous read first
+        if (buffer->converter_residual_count > 0)
+        {
+            ma_uint64 input_frames_processed_this_iteration = buffer->converter_residual_count;
+            ma_uint64 output_frame_processed_this_iteration = outputFramesToProcessThisIteration;
+            ma_data_converter_process_pcm_frames(&buffer->converter, buffer->converter_residual, &input_frames_processed_this_iteration, runningFramesOut, &output_frame_processed_this_iteration);
+            
+            // ak: Make sure the data in the cache is consumed, this can be
+            // optimized to use a cursor instead of a mem_move()
+            mem_move(buffer->converter_residual, buffer->converter_residual + input_frames_processed_this_iteration*bpf, (size_t)(AUDIO_BUFFER_RESIDUAL_CAPACITY - input_frames_processed_this_iteration)*bpf);
+            buffer->converter_residual_count -= (ma_uint32)input_frames_processed_this_iteration; // safe cast
+            total_output_frames_processed += (ma_uint32)output_frame_processed_this_iteration; // safe cast
+        }
+        else
+        {
+            // ak: Getting here means there are no residual frames from the
+            // previous read. fresh data can now be pulled from the Audio_Buffer
+            // and processed. A best guess needs to be used made to determine
+            // how many input frames to pull from the buffer. There are three
+            // possible outcomes:
+            // 1) exact
+            // 2) underestimated;
+            // 3) overestimated.
+            //
+            // When the guess is exactly correct or underestimated there is
+            // nothing special to handle, it'll be handled naturally by the loop
+            //
+            // When the guess is overestimated, that's when it gets more
+            // complicated. In this case, any overflow needs to be stored in a
+            // buffer for later processing by the next read
+            ma_uint32 estimated_input_frame_count = (ma_uint32)(((float)buffer->converter.resampler.sampleRateIn / buffer->converter.resampler.sampleRateOut)*outputFramesToProcessThisIteration);
+            if (estimated_input_frame_count == 0) estimated_input_frame_count = 1; // Make sure at least one input frame is read
+            if (estimated_input_frame_count > inputBufferFrameCap) estimated_input_frame_count = inputBufferFrameCap;
+            
+            ma_uint32 intput_frames_in_interanl_format_count = audio_buffer_read_frames_in_internal_format(buffer, input_buffer, estimated_input_frame_count);
+            ma_uint64 input_frames_processed_this_iteration = intput_frames_in_interanl_format_count;
+            ma_uint64 outputFramesProcessedThisIteration = outputFramesToProcessThisIteration;
+            ma_data_converter_process_pcm_frames(&buffer->converter, input_buffer, &input_frames_processed_this_iteration, runningFramesOut, &outputFramesProcessedThisIteration);
+            total_output_frames_processed += (ma_uint32)outputFramesProcessedThisIteration;
+            
+            if (intput_frames_in_interanl_format_count > input_frames_processed_this_iteration)
+            {
+                // ak: getting here means the estimated input frame count was
+                // overestimated. The residual needs be stored for later use
+                ma_uint64 residual_frame_count = intput_frames_in_interanl_format_count - input_frames_processed_this_iteration;
+
+                // ak: a safety check to make sure the capacity of the residual cache is not exceeded
+                if (residual_frame_count > AUDIO_BUFFER_RESIDUAL_CAPACITY)
+                {
+                    residual_frame_count = AUDIO_BUFFER_RESIDUAL_CAPACITY;
+                }
+                mem_copy(buffer->converter_residual, input_buffer + input_frames_processed_this_iteration*bpf, (size_t)(residual_frame_count*bpf));
+            }
+            
+            if (intput_frames_in_interanl_format_count < estimated_input_frame_count) break;  // reached the end of the sound
+        }
+    }
+    
+    return total_output_frames_processed;
 }
