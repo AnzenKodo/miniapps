@@ -19,12 +19,6 @@ internal Str8 *os_program_path_get(void)
 
 internal void os_main(void)
 {
-    _os_core_state.log_context = log_init();
-#if BUILD_DEBUG
-    _os_core_state.log_context.level = Log_Level_Info;
-    fmt_println("# Program Output ============================================================ #");
-#else
-    _os_core_state.log_context.level = Log_Level_None;
-#endif
+    g_log = log_alloc();
     base_main();
 }

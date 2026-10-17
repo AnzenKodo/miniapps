@@ -43,7 +43,45 @@ internal U8Array fs_file_path_read_full(Str8 path, Arena *arena)
     return result;
 }
 
-// ak: Directory Operations ===================================================
+// ak: File Write
+//=============================================================================
+
+internal size_t fs_file_write(Fs_File file, U8Array data)
+{
+    return fs_file_write_rng(file, data, rng1_u64(0, data.length));
+}
+internal size_t fs_file_write_rng(Fs_File file, U8Array data, Rng1_U64 rng)
+{
+    return fs_file_write_rng_raw(file, (void *)data.v, rng);
+}
+internal size_t fs_file_write_append(Fs_File file, U8Array data)
+{
+    return fs_file_write_append_raw(file, (void *)data.v, data.length);
+}
+
+internal size_t fs_file_path_write(Str8 file_path, U8Array data)
+{
+    return fs_file_path_write_rng(file_path, data, rng1_u64(0, data.length));
+}
+internal size_t fs_file_path_write_rng(Str8 file_path, U8Array data, Rng1_U64 rng)
+{
+    size_t result = 0;
+    Fs_File file = fs_file_open(file_path, Fs_File_Access_Flag_Write|Fs_File_Access_Flag_ShareWrite);
+    result = fs_file_write_rng(file, data, rng);
+    fs_file_close(file);
+    return result;
+}
+internal size_t fs_file_path_write_append(Str8 file_path, U8Array data)
+{
+    size_t result = 0;
+    Fs_File file = fs_file_open(file_path, Fs_File_Access_Flag_Append|Fs_File_Access_Flag_ShareWrite);
+    result = fs_file_write_append(file, data);
+    fs_file_close(file);
+    return result;
+}
+
+// ak: Directory Operations
+//=============================================================================
 
 internal bool fs_dir_ensure(Str8 path)
 {

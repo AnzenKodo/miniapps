@@ -21,7 +21,6 @@ typedef struct _Os_Core_State _Os_Core_State;
 struct _Os_Core_State
 {
     Str8_Array args;
-    Log_Context log_context;
     Str8 data_home;
 };
 

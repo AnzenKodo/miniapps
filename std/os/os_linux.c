@@ -120,7 +120,7 @@ int main(int argc, char *argv[])
     
     // ak: make array of args
     {
-        _os_core_state.args = array_alloc(scratch.arena, Str8_Array, (size_t)argc);
+        _os_core_state.args = array_alloc(scratch.arena, Str8_Array, (size_t)argc, 0);
         for (int i = 0; i < argc; i++)
         {
             Str8 str = str8_from_cstr(argv[i]);
@@ -273,7 +273,7 @@ internal size_t fs_file_read_raw(Fs_File file, Rng1_U64 rng, void *out_data)
 
 // ak: File Write
 
-internal size_t fs_file_write(Fs_File file, void *data, Rng1_U64 rng)
+internal size_t fs_file_write_rng_raw(Fs_File file, void *data, Rng1_U64 rng)
 {
     size_t total_num_bytes_to_write = dim_rng1(rng);
     size_t total_num_bytes_written = 0;
@@ -297,7 +297,7 @@ internal size_t fs_file_write(Fs_File file, void *data, Rng1_U64 rng)
     return total_num_bytes_written;
 }
 
-internal size_t fs_file_write_append(Fs_File file, void *data, size_t size)
+internal size_t fs_file_write_append_raw(Fs_File file, void *data, size_t size)
 {
     size_t total_num_bytes_written = write(file, data, size);
     return total_num_bytes_written;

@@ -78,8 +78,16 @@ internal U8Array fs_file_path_read(Str8 path, Rng1_U64 range, Arena *arena);
 internal U8Array fs_file_path_read_full(Str8 path, Arena *arena);
 
 // ak: File Write
-internal size_t fs_file_write(Fs_File file, void *data, Rng1_U64 rng);
-internal size_t fs_file_write_append(Fs_File file, void *data, size_t size);
+internal size_t fs_file_write_rng_raw(Fs_File file, void *data, Rng1_U64 rng);
+internal size_t fs_file_write(Fs_File file, U8Array data);
+internal size_t fs_file_write_rng(Fs_File file, U8Array data, Rng1_U64 rng);
+internal size_t fs_file_write_append_raw(Fs_File file, void *data, size_t size);
+internal size_t fs_file_write_append(Fs_File file, U8Array data);
+
+internal size_t fs_file_path_write_rng_raw(Fs_File file, void *data, Rng1_U64 rng);
+internal size_t fs_file_path_write(Str8 file_path, U8Array data);
+internal size_t fs_file_path_write_rng(Str8 file_path, U8Array data, Rng1_U64 rng);
+internal size_t fs_file_path_write_append(Str8 file_path, U8Array data);
 
 // ak: Properties
 internal Fs_Properties fs_properties_from_file(Fs_File file);

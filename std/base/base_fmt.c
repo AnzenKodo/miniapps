@@ -10,7 +10,7 @@
 internal uint64_t fmt_fprint(Fs_File file, const char *string)
 {
     uint64_t length = cstr8_length((uint8_t *)string);
-    fs_file_write_append(file, (char *)string, length);
+    fs_file_write_append_raw(file, (char *)string, length);
     return length;
 }
 internal uint64_t fmt_fprintln(Fs_File file, const char *string)
@@ -28,7 +28,7 @@ internal uint64_t fmt_vfprintf(Fs_File file, const char *format, va_list args)
     va_copy(args_copy, args);
         int32_t needed = fmt_vsnprintf(NULL, 0, format, args_copy) + 1;
     va_end(args_copy);
-    if (needed > 0) 
+    if (needed > 0)
     {
         char *buffer = arena_push(scratch.arena, char, needed);
         va_copy(args_copy, args);
@@ -56,7 +56,7 @@ internal uint64_t fmt_vfprintfln(Fs_File file, const char *format, va_list args)
     va_copy(args_copy, args);
         int32_t needed = fmt_vsnprintf(NULL, 0, format, args_copy) + 2;
     va_end(args_copy);
-    if (needed > 0) 
+    if (needed > 0)
     {
         char *buffer = arena_push(scratch.arena, char, needed);
         va_copy(args_copy, args);
