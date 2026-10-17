@@ -154,18 +154,18 @@ struct F64Array
 
 #define ArrayLength(a) (sizeof(a) / sizeof((a)[0]))
 #if LANGUAGE_CPP
-    #define array_alloc(a, T, s) ({ \
+    #define array_alloc(a, T, s, l) ({ \
         T _arr = {}; \
-        _arr.size = (size_t)(s); \
-        _arr.length = 0; \
+        _arr.size = (s); \
+        _arr.length = (l); \
         _arr.v = (decltype(_arr.v))_arena_push((a), sizeof(_arr.v[0]) * (size_t)(s), AlignOf(decltype(_arr.v[0])), true); \
         _arr; \
     })
 #else
-    #define array_alloc(a, T, s) \
+    #define array_alloc(a, T, s, l) \
         (T){ \
             .size = (s), \
-            .length = 0, \
+            .length = (l), \
             .v = arena_push((a), TypeOf(StructZeroType(T).v[0]), (s)) \
         }
 #endif
@@ -273,6 +273,33 @@ read_only global uint8_t integer_symbol_reverse[128] =
 
 // ak: Safe Casts =============================================================
 
+#define Array(v, s) _Generic((v), \
+    uint8_t*:  u8array,  \
+    uint16_t*: u16array, \
+    uint32_t*: u32array, \
+    uint64_t*: u64array, \
+    int8_t*:   i8array,  \
+    int16_t*:  i16array, \
+    int32_t*:  i32array, \
+    int64_t*:  i64array, \
+    float*:    f32array, \
+    double*:   f64array  \
+)((v), (s))
+
+// ak: Array Make =============================================================
+
+internal inline U8Array u8array(uint8_t *p, size_t n);
+internal inline U16Array u16array(uint16_t *p, size_t n);
+internal inline U32Array u32array(uint32_t *p, size_t n);
+internal inline U64Array u64array(uint64_t *p, size_t n);
+internal inline I8Array i8array(int8_t *p, size_t n);
+internal inline I16Array i16array(int16_t *p, size_t n);
+internal inline I32Array i32array(int32_t *p, size_t n);
+internal inline I64Array i64array(int64_t *p, size_t n);
+internal inline F32Array f32array(float *p, size_t n);
+internal inline F64Array f64array(double *p, size_t n);
+
+// ak: Safe Casts =============================================================
 internal uint16_t safe_cast_u16(uint32_t x);
 internal uint32_t safe_cast_u32(uint64_t x);
 internal int32_t  safe_cast_i32(int64_t x);
