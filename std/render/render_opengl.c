@@ -749,7 +749,7 @@ internal Render_Handle render_tex2d_alloc(Render_Resource_Kind kind, Render_Tex_
 internal void render_tex2d_free(Render_Handle handle)
 {
     _Render_Opengl_Tex_2D *tex2d = _render_opengl_tex2d_from_handle(handle);
-    if (tex2d != 0)
+    if (tex2d != NULL)
     {
         glDeleteTextures(1, &tex2d->id);
         SLLStackPush(_render_opengl_state->free_tex2d, tex2d);

@@ -63,6 +63,7 @@ internal void *_arena_push(Arena *arena, size_t size, size_t align, bool fill_ze
 #define ARENA_HEADER_SIZE (sizeof(Arena))
 #define arena_push(a, T, n) ((T *)(_arena_push(a, sizeof(T)*(n), AlignOf(T), true)))
 #define arena_push_nz(a, T, n) ((T *)(_arena_push(a, sizeof(T)*(n), AlignOf(T), false)))
+internal size_t arena_pos(Arena *arena);
 internal void arena_pop(Arena *arena, size_t size);
 internal void arena_pop_to(Arena *arena, size_t pos);
 internal void arena_clear(Arena *arena);

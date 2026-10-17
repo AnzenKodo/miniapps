@@ -1,5 +1,4 @@
 // ak: Arena
-#include <stdio.h>
 //=============================================================================
 
 internal Arena *_arena_alloc(ArenaParams *params)
