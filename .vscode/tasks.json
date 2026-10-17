@@ -2,9 +2,9 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "Build Program",
+            "label": "Build Program - Play",
             "type": "shell",
-            "command": "clang build.c && ./a.out build-debugger",
+            "command": "clang build.c && ./a.out build-debugger play",
             "problemMatcher": {
                 "owner": "cpp",
                 "fileLocation": [

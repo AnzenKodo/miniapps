@@ -385,8 +385,6 @@ internal void base_main(void)
     Arena *arena = arena_alloc();
     
     Build_Info info = STRUCT_ZERO;
-    // info.name = APP_CMD_NAME;
-    // info.entry_point = str8("src/app/app_main.c");
     info.arena = arena;
     
     bool should_print_help = false;

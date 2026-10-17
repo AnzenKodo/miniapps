@@ -4,11 +4,11 @@
         {
             "name": "Debug Program",
             "request": "launch",
-            "program": "${workspaceFolder}/build/serpent-path_debug",
+            "program": "${workspaceFolder}/build/play_debug",
             "cwd": "${workspaceFolder}",
             "type": "cppdbg",
             // "arguments": "shaders/circles.frag",
-            "preLaunchTask": "Build Program"
+            "preLaunchTask": "Build Program - Play"
         },
         {
             "name": "Debug Build",
