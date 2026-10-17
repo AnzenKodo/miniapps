@@ -62,14 +62,14 @@ internal Str8 mdg_c_string_literal_from_multiline_string(Str8 string, Arena *are
 }
 
 
-internal Str8 mdg_c_array_literal_contents_from_string(Str8 string, Arena *arena)
+internal Str8 mdg_c_array_literal_contents_from_string(Str8 string, size_t wrap_size, Arena *arena)
 {
     Arena_Temp scratch = arena_scratch_begin(0, 0);
     Str8_List strings = STRUCT_ZERO;
     {
         for (size_t off = 0; off < string.length;)
         {
-            size_t chunk_size = Min(string.length-off, 64);
+            size_t chunk_size = Min(string.length-off, wrap_size);
             uint8_t *chunk_bytes = string.cstr+off;
             Str8 chunk_text_string = STRUCT_ZERO;
             chunk_text_string.size = chunk_size*5;

@@ -477,6 +477,7 @@ void base_main(void)
     }
     
     //- ak: gather & generate all embeds
+    size_t wrap_size = 64;
     for (MDG_ParsedFile_Node *node = parses.first; node != NULL; node = node->next)
     {
         MD_Node *file = node->v.root;
@@ -493,12 +494,12 @@ void base_main(void)
                 str8_list_push (arena, &layer->h_tables, embed_string);
                 str8_list_pushf(arena, &layer->h_tables, ");\n\n");
             }
-            if (md_node_has_tag(md_node, str8("embed_file"), 0))
+            else if (md_node_has_tag(md_node, str8("embed_file"), 0))
             {
                 Str8 layer_key = mdg_layer_key_from_path(file->string, src_path, arena);
                 MDG_Layer *layer = mdg_layer_from_key(state, layer_key, arena);
                 Str8 string = str8_from_u8array(fs_file_path_read_full(md_node->first->string, arena));
-                Str8 embed_string = mdg_c_array_literal_contents_from_string(string, arena);
+                Str8 embed_string = mdg_c_array_literal_contents_from_string(string, wrap_size, arena);
                 str8_list_pushf(arena, &layer->h_tables,
                     "read_only global uint8_t %.*s__data[] =\n{\n", str8_varg(md_node->string));
                 str8_list_push (arena, &layer->h_tables, embed_string);
@@ -506,6 +507,14 @@ void base_main(void)
                 str8_list_pushf(arena, &layer->h_tables,
                     "read_only global U8Array %.*s = {%.*s__data, sizeof(%.*s__data), sizeof(%.*s__data)};\n",
                     str8_varg(md_node->string), str8_varg(md_node->string), str8_varg(md_node->string), str8_varg(md_node->string));
+            }
+            if (md_node_has_tag(md_node, str8("embed_audio"), 0))
+            {
+                Str8 layer_key = mdg_layer_key_from_path(file->string, src_path, arena);
+                MDG_Layer *layer = mdg_layer_from_key(state, layer_key, arena);
+                Str8 embed_string = audio_file_export_to_str8(md_node->first->string, md_node->string, wrap_size, arena);
+                str8_list_push(arena, &layer->h_tables, embed_string);
+                str8_list_pushf(arena, &layer->h_tables, "\n");
             }
         }
     }
