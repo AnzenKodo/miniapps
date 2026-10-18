@@ -38,5 +38,11 @@ vim.api.nvim_create_user_command("BuildMeta",  function()
         vim.cmd('make')
     end
 end, { desc = "Bootstrap build system"})
+vim.api.nvim_create_user_command("BuildDebugger",  function()
+    vim.opt.makeprg = cc_command .. "build-debugger " .. program_name
+    vim.cmd('make')
+    vim.opt.makeprg = cc_command .. "build-dry " .. program_name
+end, { desc = "Bootstrap build system"})
 
-vim.keymap.set("n", "<F5>", "<CMD>BuildRun<CR>", { desc = "Build Run" })
+-- vim.keymap.set("n", "<F5>", "<CMD>BuildRun<CR>", { desc = "Build Run" })
+vim.keymap.set("n", "<F5>", "<CMD>BuildDebugger<CR>", { desc = "Build Debug" })

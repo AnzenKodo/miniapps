@@ -380,7 +380,7 @@ internal int32_t build_compile_program(Build_Info *info, Build_Info *ma_info)
 
 // ak: Build Entry Point ======================================================
 
-internal void base_main(void)
+internal int32_t base_main(void)
 {
     Arena *arena = arena_alloc();
     
@@ -465,7 +465,7 @@ internal void base_main(void)
         {
             fmt_eprintf("Error: wrong option provided `%s`.\n\n", arg1.cstr);
             should_print_help = true;
-            os_exit(1);
+            return 1;
         }
     }
     else
@@ -530,7 +530,7 @@ internal void base_main(void)
         }
     }
     arena_free(arena);
-    os_exit(exit_code);
+    return exit_code;
 }
 
 // ak: Build functions ========================================================

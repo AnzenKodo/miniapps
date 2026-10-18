@@ -1,0 +1,18 @@
+// raddbg 0.9.30 project file
+
+name: MiniApps
+theme: Grove
+target:
+{
+  executable: "build/play_debug"
+  arguments: ""
+  working_directory: "../Miniapps"
+  enabled: 1
+}
+target:
+{
+  executable: "build/play_debug"
+  arguments: "README.md"
+  working_directory: "../Miniapps"
+  enabled: 0
+}
