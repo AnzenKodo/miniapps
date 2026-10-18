@@ -1,5 +1,32 @@
-// ak: Helper Functions
-//=============================================================================
+// ak: Helper =================================================================
+
+internal Str8 log_level_string_get(Log_Level level)
+{
+    const char *level_string = "";
+    switch (level)
+    {
+        case Log_Level_Info:
+        {
+            level_string = "[INFO]";
+        } break;
+        case Log_Level_Debug:
+        {
+            level_string = "[DEBUG]";
+        } break;
+        case Log_Level_Warn:
+        {
+            level_string = "[WARN]";
+        } break;
+        case Log_Level_Error:
+        {
+            level_string = "[ERROR]";
+        } break;
+        case Log_Level_COUNT: {} break;
+    }
+    return str8(level_string);
+}
+
+// ak: Log Creation ===========================================================
 
 internal Log *log_alloc(void)
 {
@@ -14,8 +41,7 @@ internal void log_release(Log *log)
     arena_free(log->arena);
 }
 
-// ak: Log Creation
-//=============================================================================
+// ak: Log Building ===========================================================
 
 internal void log_msg(Log *log, Log_Level level, const char *file_name, size_t line_number, Str8 string)
 {
@@ -42,8 +68,7 @@ internal void log_msgf(Log *log, Log_Level level, const char *file_name, size_t 
     }
 }
 
-// ak: Log Result
-//=============================================================================
+// ak: Log Result =============================================================
 
 internal Log_Result log_get_result(Log *log, size_t indent, Arena *arena)
 {
