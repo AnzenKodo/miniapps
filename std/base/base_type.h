@@ -233,6 +233,16 @@ CheckNil(nil,p) ? \
 #define DLLPushFront(f,l,n) DLLPushFront_NPZ(0,f,l,n,next,prev)
 #define DLLRemove(f,l,n) DLLRemove_NPZ(0,f,l,n,next,prev)
 
+// ak: Handle =================================================================
+    
+#ifdef __cplusplus
+    #define HandlePack(type, ptr)       (type{ reinterpret_cast<uint64_t>(ptr) })
+    #define HandleUnpack(type, handle)  (reinterpret_cast<type *>((handle).u64[0]))
+#else
+    #define HandlePack(type, ptr)       ((type){ (uint64_t)(ptr) })
+    #define HandleUnpack(type, handle)  ((type *)(uint64_t)((handle).id[0]))
+#endif
+
 // ak: Constants
 //=============================================================================
 
