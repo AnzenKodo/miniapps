@@ -126,7 +126,7 @@ internal void flags_init(void)
     _flags_state->arena = arena;
 }
 
-internal void flags_clean(void)
+internal void flags_uninit(void)
 {
     arena_free(_flags_state->arena);
 }
@@ -609,6 +609,7 @@ internal void flags_print_error(void)
 {
     for (_Flags_Error *error = _flags_state->first_error; error != NULL; error = error->next)
     {
+        fmt_eprintf("%s8 ", log_level_string_get(Log_Level_Error));
         switch (error->kind)
         {
             case _Flags_Error_Kind_MissingValue:
@@ -684,25 +685,25 @@ internal void flags_print_error(void)
             break;
             case _Flags_Error_Kind_RequireArg:
             {
-                fmt_eprintfln("at least %zu argument without option is required.",
+                fmt_eprintfln("at least %zu argument is required.",
                     error->arg_index + 1);
             }
             break;
             case _Flags_Error_Kind_InvalidIntArg:
             {
-                fmt_eprintfln("%zu argument without option should be integer. Examples: '42', '-7', '123'.",
+                fmt_eprintfln("%zu argument should be integer. Examples: '42', '-7', '123'.",
                     error->arg_index + 1);
             }
             break;
             case _Flags_Error_Kind_UIntMinusArg:
             {
-                fmt_eprintfln("%zu argument without option does not accept negative values (got '%.*s'). Use a positive integer instead.",
+                fmt_eprintfln("%zu argument does not accept negative values (got '%.*s'). Use a positive integer instead.",
                     error->arg_index + 1, str8_varg(error->value));
             }
             break;
             case _Flags_Error_Kind_InvalidFloatArg:
             {
-                fmt_eprintfln("%zu argument without option expects a floating-point number, but '%.*s' was given. Examples: '.14', '-0.5', '2', '2.0'.",
+                fmt_eprintfln("%zu argument expects a floating-point number, but '%.*s' was given. Examples: '.14', '-0.5', '2', '2.0'.",
                     error->arg_index + 1, str8_varg(error->value));
             }
             break;
@@ -718,7 +719,6 @@ internal void flags_print_help(void)
 {
     for (Flags_Option *option = _flags_state->first_option; option != NULL; option = option->next)
     {
-        term_style_start(OS_STDOUT, TERM_BOLD);
         fmt_printf("    %s%s%s%s--%.*s",
             option->shortname.length > 0 ? "-" : "",
             option->shortname.length > 0 ? (char *)option->shortname.cstr : "",

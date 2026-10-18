@@ -172,7 +172,7 @@ internal uint64_t _flags_get_values_count(Str8_Array *args, uint64_t index, bool
 // ak: Flags core functions ===================================================
 
 internal void flags_init(void);
-internal void flags_clean(void);
+internal void flags_uninit(void);
 internal bool flags_parse(Str8_Array *args);
 internal void flags_print_error(void);
 internal void flags_print_help(void);
