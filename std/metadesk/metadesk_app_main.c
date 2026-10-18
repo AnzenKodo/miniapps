@@ -47,7 +47,7 @@ internal Str8 src_path_from_file_path(Str8 file_path, Str8_Array src_paths)
     return result;
 }
 
-void base_main(void)
+internal int32_t base_main(void)
 {
     Arena *arena = arena_alloc();
     Str8_Array src_paths = STRUCT_ZERO;
@@ -74,17 +74,12 @@ void base_main(void)
         flags_print_error();
         fmt_print("\n");
         print_help_message();
-        os_exit(1);
+        return 1;
     }
     if (help)
     {
         print_help_message();
-        os_exit(0);
-    }
-    if (version)
-    {
-        fmt_print("v"MDA_VERSION);
-        os_exit(0);
+        return 0;
     }
     
     //- ak: initialization ====================================================
@@ -669,4 +664,5 @@ void base_main(void)
         log_print_color_level(&log, msg->level);
         fmt_eprintf("%.*s\n", str8_varg(msg->string));
     }
+    return 0;
 }

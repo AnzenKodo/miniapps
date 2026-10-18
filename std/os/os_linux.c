@@ -148,9 +148,7 @@ int main(int argc, char *argv[])
     }
     
     // ak: os entry point
-    os_main();
-    
-    arena_scratch_end(scratch);
+    return os_main();
 }
 
 // ak: Os Functions for Base Layer

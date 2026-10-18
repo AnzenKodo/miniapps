@@ -51,7 +51,7 @@ internal Str8 os_env_get(Str8 name);
 
 // ak: OS Entry Points ========================================================
 
-internal void os_main(void);
+internal int32_t os_main(void);
 
 // ak: Global Variables
 //=============================================================================

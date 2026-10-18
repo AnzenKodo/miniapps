@@ -17,8 +17,8 @@ internal Str8 *os_program_path_get(void)
 // ak: OS Entry Points
 //=============================================================================
 
-internal void os_main(void)
+internal int32_t os_main(void)
 {
     g_log = log_alloc();
-    base_main();
+    return base_main();
 }
