@@ -154,7 +154,7 @@ internal Str8 str8_substr(Str8 str, Rng1_U64 range);
 internal Str8 str8_postfix(Str8 str, size_t length);
 internal Str8 str8_prefix(Str8 str, size_t length);
 internal Str8 str8_skip(Str8 str, size_t amount);
-internal Str8 str8_chop(Str8 str, uint64_t amount);
+internal Str8 str8_chop(Str8 str, size_t amount);
 internal Str8 str8_skip_chop_whitespace(Str8 string);
 internal Str8 str8_cat(Arena *arena, Str8 s1, Str8 s2);
 

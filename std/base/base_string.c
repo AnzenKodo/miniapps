@@ -844,7 +844,7 @@ internal Str8 str8fv(Arena *arena, const char *format, va_list args)
     Str8 result = STRUCT_ZERO;
     va_list args_copy;
     va_copy(args_copy, args);
-        uint32_t needed = fmt_vsnprintf(0, 0, format, args) + 1;
+        size_t needed = fmt_vsnprintf(0, 0, format, args) + 1;
         result.cstr = arena_push_nz(arena, uint8_t, needed);
         result.length = fmt_vsnprintf((char*)result.cstr, needed, format, args_copy);
         result.size = result.length;
