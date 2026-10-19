@@ -20,7 +20,7 @@ internal bool term_is_color_allowed(void)
     return result;
 }
 
-internal void term_style_start(Fs_File file, const char *style)
+internal void term_style_start(Fs_File file, Str8 style)
 {
     _term_state.file = file;
     if (term_is_color_allowed())
@@ -35,12 +35,12 @@ internal void term_style_end(void)
     _term_state.file = 0;
 }
 
-internal char *term_style_get(const char *style)
+internal Str8 term_style_get(Str8 style)
 {
-    char *result = NULL;
+    Str8 result = STRUCT_ZERO;
     if (term_is_color_allowed())
     {
-        result = (char *)style;
+        result = style;
     }
     return result;
 }
