@@ -21,12 +21,8 @@
 // ak: Code Keywords
 //=============================================================================
 
-#if COMPILER_CLANG || COMPILER_GCC
-#   define FILE_NAME __FILE_NAME__
-#else
-#   define FILE_NAME __FILE__
-#endif
 #define LINE_NUMBER __LINE__
+#define FILE_PATH   __FILE__
 
 #if COMPILER_MSVC
 #   define thread_static __declspec(thread)
