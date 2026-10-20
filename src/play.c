@@ -8,10 +8,10 @@
 
 internal void play_help_message()
 {
-    fmt_println("USAGE:");
+    fmt_println(str8("USAGE:"));
     Str8 *program_name = os_program_path_get();
     fmt_printfln("   %s [OPTIONS]", program_name->cstr);
-    fmt_println("OPTIONS:");
+    fmt_println(str8("OPTIONS:"));
     flags_print_help();
 }
 
@@ -70,4 +70,6 @@ internal int32_t base_main(void)
     flags_uninit();
     audio_music_unload(music);
     audio_uninit();
+    
+    return 0;
 }
