@@ -5,5 +5,6 @@ TODO:
     - [x] Make custom logging print function
 - [ ] Add github release action
 - [ ] Write README.md
+- [ ] check spelling
 
 https://www.youtube.com/watch?v=N409lV1cPy8
