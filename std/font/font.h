@@ -8,45 +8,6 @@
 #ifndef FONT_H
 #define FONT_H
 
-// ak: External Includes
-//=============================================================================
-
-#define STBTT_STATIC
-#define stbtt_uint8 uint8_t
-typedef int8_t   stbtt_int8;
-typedef uint16_t stbtt_uint16;
-typedef int16_t  stbtt_int16;
-typedef uint32_t stbtt_uint32;
-typedef int32_t  stbtt_int32;
-#define STBTT_ifloor(x)   ((int) floor_f64(x))
-#define STBTT_iceil(x)    ((int) ceil_f64(x))
-#define STBTT_sqrt(x)      sqrt_f64(x)
-#define STBTT_pow(x,y)     pow_f64(x,y)
-#define STBTT_fmod(x,y)    mod_f64(x,y)
-#define STBTT_cos(x)       cos_f64(x)
-#define STBTT_acos(x)      acos_f64(x)
-#define STBTT_fabs(x)      Abs(x)
-// TODO(ak): implement alloc api similer to malloc
-#define STBTT_malloc(x,u)  ((void)(u),malloc(x))
-#define STBTT_free(x,u)    ((void)(u),free(x))
-#define STBTT_assert(x)    Assert(x)
-#define STBTT_strlen(x)    cstr8_length((uint8_t* )x)
-#define STBTT_memcpy       mem_copy
-#define STBTT_memset       mem_set
-#include "./external/stb_truetype.h"
-
-#define KB_TEXT_SHAPE_STATIC
-#define kbts_u64 uint64_t
-#define kbts_u32 uint32_t
-#define kbts_u16 uint16_t
-#define kbts_u8  uint8_t
-#define kbts_s64 int64_t
-#define kbts_s32 int32_t
-#define kbts_s16 int16_t
-#define kbts_s8  int8_t
-#define kbts_b32 int
-#include "./external/kb_text_shape.h"
-
 // ak: Types
 //=============================================================================
 

@@ -95,7 +95,7 @@ internal void build_compile_msvc(Build_Info *info)
     }
     // ak: lock lang Version
     str8_list_pushf(info->arena, &info->cmd, " -std:c11");
-    // ak: Optimaization
+    // ak: Optimization
     if (info->type == Build_Type_Release)
     {
         str8_list_pushf(info->arena, &info->cmd, " -Ox -wd4711"); // Enable
@@ -112,7 +112,7 @@ internal void build_compile_msvc(Build_Info *info)
     {
         str8_list_pushf(info->arena, &info->cmd, " -W4 -Wall");
     }
-    // ak: disbale uselss warnings
+    // ak: disable uselss warnings
     str8_list_pushf(info->arena, &info->cmd,
         " -wd4668"                 // ak: For macros magic
         " -wd4464"                 // ak: Warning about '..' in path
@@ -159,7 +159,7 @@ internal void build_compile_gcc_style_flags(Build_Info *info)
     {
         str8_list_pushf(info->arena, &info->cmd, " -std=gnu99");
     }
-    // ak: optimaization
+    // ak: Optimization
     if (info->type == Build_Type_Release)
     {
         str8_list_pushf(info->arena, &info->cmd, " -O3");

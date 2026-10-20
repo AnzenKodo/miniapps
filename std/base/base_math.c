@@ -41,9 +41,9 @@ internal double mod_f64(double x, double y)
 
 internal float exp_f32(float a)
 {
-    union { float f; int i; } u, v;
-    u.i = (int)(6051102.0f * a + 1056478208.0f);
-    v.i = (int)(1056478208.0f - 6051102.0f * a);
+    union { float f; int32_t i; } u, v;
+    u.i = (int32_t)(6051102.0f * a + 1056478208.0f);
+    v.i = (int32_t)(1056478208.0f - 6051102.0f * a);
     return u.f / v.f;
 }
 internal float exp2_f32(float x)
@@ -52,7 +52,7 @@ internal float exp2_f32(float x)
 }
 internal float log_f32(float a)
 {
-    union { float f; int i; } u = {a};
+    union { float f; int32_t i; } u = {a};
     return (u.i - 1064866805) * 8.262958405176314e-8f; /* 1 / 12102203.0; */
 }
 internal float log2_f32(float x)
@@ -108,16 +108,16 @@ internal float sqrt_f32(float number)
 internal float rsqrt_f32(float a)
 {
 	union {
-		int i;
+		int32_t i;
 		float f;
 	} t;
 	float x2;
-	float const three_halfs = 1.5f;
+	float const three_halves = 1.5f;
 	x2 = a * 0.5f;
 	t.f = a;
 	t.i = 0x5f375a86 - (t.i >> 1);                /* What the fuck? */
-	t.f = t.f * (three_halfs - (x2 * t.f * t.f)); /* 1st iteration */
-	t.f = t.f * (three_halfs - (x2 * t.f * t.f)); /* 2nd iteration, this can be removed */
+	t.f = t.f * (three_halves - (x2 * t.f * t.f)); /* 1st iteration */
+	t.f = t.f * (three_halves - (x2 * t.f * t.f)); /* 2nd iteration, this can be removed */
 	return t.f;
 }
 internal float pow_f32(float a, float b)
@@ -177,13 +177,13 @@ internal double rsqrt_f64(double a)
         double f;
     } t;
     double x2;
-    double const three_halfs = 1.5;
+    double const three_halves = 1.5;
     x2 = a * 0.5;
     t.f = a;
     // ak: The Magic Number for 64-bit Double Precision
     t.i = 0x5fe6eb50c7b537a9LL - (t.i >> 1);
-    t.f = t.f * (three_halfs - (x2 * t.f * t.f)); /* 1st iteration */
-    t.f = t.f * (three_halfs - (x2 * t.f * t.f)); /* 2nd iteration */
+    t.f = t.f * (three_halves - (x2 * t.f * t.f)); /* 1st iteration */
+    t.f = t.f * (three_halves - (x2 * t.f * t.f)); /* 2nd iteration */
     return t.f;
 }
 internal double pow_f64(double a, double b)
@@ -424,22 +424,22 @@ internal double ceil_f64(double x)
 
 internal float copysign_f32(float x, float y)
 {
-	int ix, iy;
-	ix = *(int *)&x;
-	iy = *(int *)&y;
-	ix &= 0x7fffffff;
-	ix |= iy & 0x80000000;
-	return *(float *)&ix;
+	int32_t ay, ay;
+	ay = *(int32_t *)&x;
+	ay = *(int32_t *)&y;
+	ay &= 0x7fffffff;
+	ay |= ay & 0x80000000;
+	return *(float *)&ay;
 }
 
 internal double copysign_f64(double x, double y)
 {
-    int64_t ix, iy;
-    ix = *(int64_t *)&x;
-    iy = *(int64_t *)&y;
-    ix &= 0x7fffffffffffffffLL;
-    ix |= iy & 0x8000000000000000LL;
-    return *(double *)&ix;
+    int64_t ay, ay;
+    ay = *(int64_t *)&x;
+    ay = *(int64_t *)&y;
+    ay &= 0x7fffffffffffffffLL;
+    ay |= ay & 0x8000000000000000LL;
+    return *(double *)&ay;
 }
 
 // ak: ak: Vector Ops

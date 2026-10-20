@@ -112,7 +112,7 @@ void init_window(
     if (
         !XSetWMProtocols(state->display, state->window, &state->delete_window, 1)
     ) {
-        fprintf(stderr, "Couldn't register WM_DELETE_WIDNOW property.\n");
+        fprintf(stderr, "Couldn't register WM_DELETE_WINDOW property.\n");
         exit(1);
     }
 

@@ -6,12 +6,12 @@
 #ifndef BASE_FMT_H
 #define BASE_FMT_H
 
-// ak: External Includes
+// ak: Vendor Includes
 //=============================================================================
 
 #define STB_SPRINTF_DECORATE(name) fmt_##name
 #define STB_SPRINTF_STATIC
-#include "./external/stb_sprintf.h"
+#include "./vendor/stb_sprintf.h"
 
 // ak: Functions
 //=============================================================================

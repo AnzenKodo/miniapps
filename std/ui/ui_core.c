@@ -296,7 +296,7 @@ internal void ui_build_end(void)
     }
     
     UI_Box *root = ui_root_from_state(ui_state);
-    // ak: claculate size and position
+    // ak: calculate size and position
     for (Axis_2d axis = (Axis_2d)0; axis < Axis_2d_COUNT; axis = (Axis_2d)(axis + 1))
     {
         _ui_calc_sizes_standalone(root, axis);

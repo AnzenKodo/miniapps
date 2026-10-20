@@ -615,18 +615,18 @@ internal void flags_print_error(void)
             case _Flags_Error_Kind_MissingValue:
             {
                 fmt_eprintfln(
-                    "opiton '%.*s' requires a value. Example: '--%.*s <value>'.",
+                    "option '%.*s' requires a value. Example: '--%.*s <value>'.",
                     str8_varg(error->flag_name), str8_varg(error->flag_name));
             }
             break;
             case _Flags_Error_Kind_UnknownOption:
             {
-                fmt_eprintfln("opiton '%.*s' is invalid.", str8_varg(error->flag_name));
+                fmt_eprintfln("option '%.*s' is invalid.", str8_varg(error->flag_name));
             }
             break;
             case _Flags_Error_Kind_NoFlagPrefix:
             {
-                fmt_eprintfln("'%.*s' is not recognized as a opiton. Option must start with '-', '--', or '/' (Windows only). Examples: '-%.*s', '--%.*s', '/%.*s'.",
+                fmt_eprintfln("'%.*s' is not recognized as a option. Option must start with '-', '--', or '/' (Windows only). Examples: '-%.*s', '--%.*s', '/%.*s'.",
                     str8_varg(error->flag_name), str8_varg(error->flag_name), str8_varg(error->flag_name), str8_varg(error->flag_name));
             }
             break;

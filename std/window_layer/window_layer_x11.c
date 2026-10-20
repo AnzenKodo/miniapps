@@ -49,8 +49,8 @@ internal void wl_init(void)
     
     // ak: loading cursors
     {
-        xcb_cursor_context_t *contex;
-        xcb_cursor_context_new(_wl_x11_state->connection, _wl_x11_state->screen, &contex);
+        xcb_cursor_context_t *context;
+        xcb_cursor_context_new(_wl_x11_state->connection, _wl_x11_state->screen, &context);
         struct
         {
             Wl_Cursor cursor;
@@ -70,9 +70,9 @@ internal void wl_init(void)
         };
         for (size_t i = 0; i < ArrayLength(map); i++)
         {
-            _wl_x11_state->cursors[map[i].cursor] = xcb_cursor_load_cursor(contex, map[i].name);
+            _wl_x11_state->cursors[map[i].cursor] = xcb_cursor_load_cursor(context, map[i].name);
         }
-        xcb_cursor_context_free(contex);
+        xcb_cursor_context_free(context);
     }
     
     // ak: create wakeup event for polling

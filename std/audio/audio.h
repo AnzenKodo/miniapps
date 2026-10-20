@@ -237,7 +237,7 @@ internal void audio_stream_process_detach(Audio_Stream stream, Audio_Callback pr
 internal void audio_processor_mixed_attach(Audio_Callback process);
 internal void audio_processor_mixed_detach(Audio_Callback process);
 
-// ak: Audio Buffer Management =================================================
+// ak: Audio Buffer Management ================================================
 
 // ak: audio buffer type management
 internal inline bool audio_buffer_match(Audio_Buffer a, Audio_Buffer b);

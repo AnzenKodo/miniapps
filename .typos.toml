@@ -1,0 +1,16 @@
+[files]
+extend-exclude = [ "vendor/" ]
+ignore-hidden = true
+ignore-files = true
+ignore-dot = true
+ignore-vcs = true
+
+[default]
+binary = false
+check-filename = true
+check-file = true
+unicode = true
+locale = "en"
+extend-ignore-re = [ "-Fo" ]
+extend-ignore-identifiers-re = []
+extend-ignore-words-re = []

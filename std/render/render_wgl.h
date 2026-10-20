@@ -100,7 +100,7 @@ typedef struct _Render_Wgl_State _Render_Wgl_State;
 struct _Render_Wgl_State
 {
     HDC hdc;
-    HGLRC contex;
+    HGLRC context;
 };
 
 // ak: Global Variables

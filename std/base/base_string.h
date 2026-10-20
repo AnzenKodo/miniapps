@@ -8,13 +8,6 @@
 #ifndef BASE_STRING_H
 #define BASE_STRING_H
 
-// ak: External Include
-//=============================================================================
-
-#define XXH_INLINE_ALL
-#define XXH_STATIC_LINKING_ONLY
-#include "./external/xxhash.h"
-
 // ak: Types
 //=============================================================================
 

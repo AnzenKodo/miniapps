@@ -1,8 +1,8 @@
-// ak: ak: External Includes
+// ak: ak: Vendor Includes
 //=============================================================================
 
 #define STB_SPRINTF_IMPLEMENTATION
-#include "./external/stb_sprintf.h"
+#include "./vendor/stb_sprintf.h"
 
 // ak: FPrint
 //=============================================================================

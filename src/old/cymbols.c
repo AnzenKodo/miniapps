@@ -388,7 +388,7 @@ int main(int argc, char *argv[]) {
     "   --kaomoji -k    Open Kaomoji piker\n"
     "   --rebuild -r    Rebuild cache files\n"
     "   --help    -h    Print help message\n"
-    "   --version -v    Print verion\n"
+    "   --version -v    Print version\n"
     "Version: "VERSION"\n"
     "SPDX-License-Identifier: MIT (https://spdx.org/licenses/MIT)\n";
 

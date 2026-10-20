@@ -1,4 +1,4 @@
-// ak: External Includes Implementation
+// ak: Vendor Includes Implementation
 //=============================================================================
 
 #define MA_NO_JACK
@@ -10,39 +10,39 @@
 #define MA_NO_ENGINE
 #define MA_NO_GENERATION
 #define MA_COINIT_VALUE 2
-#include "./external/miniaudio.h"
+#include "./vendor/miniaudio.h"
 
 // #define DRWAV_MALLOC malloc
 // #define DRWAV_REALLOC realloc
 // #define DRWAV_FREE free
 #define DR_WAV_IMPLEMENTATION
-#include "./external/dr_wav.h"
+#include "./vendor/dr_wav.h"
 
 // #define DRMP3_MALLOC malloc
 // #define DRMP3_REALLOC realloc
 // #define DRMP3_FREE free
 #define DR_MP3_IMPLEMENTATION
-#include "./external/dr_mp3.h"
+#include "./vendor/dr_mp3.h"
 
 // #define QOA_MALLOC malloc
 // #define QOA_FREE free
 #define QOA_IMPLEMENTATION
-#include "./external/qoa.h"           // QOA loading and saving functions
-#include "./external/qoaplay.c"       // QOA stream playing helper functions
+#include "./vendor/qoa.h"           // QOA loading and saving functions
+#include "./vendor/qoaplay.c"       // QOA stream playing helper functions
 
 // #define DRFLAC_MALLOC malloc
 // #define DRFLAC_REALLOC realloc
 // #define DRFLAC_FREE free
 #define DR_FLAC_NO_WIN32_IO
 #define DR_FLAC_IMPLEMENTATION
-#include "external/dr_flac.h"
+#include "vendor/dr_flac.h"
 
 // STB_VORBIS_NO_STDIO
 // #define NULL 0
 // #define malloc(s)   0
 // #define free(s)     ((void) 0)
 // #define realloc(s)  0
-#include "./external/stb_vorbis.c" // for OGG
+#include "./vendor/stb_vorbis.c" // for OGG
 
 // ak: Private Types
 //=============================================================================
@@ -108,7 +108,7 @@ struct _Audio_State
 
 global _Audio_State *_audio_state = 0;
 
-// ak: Private Function Defination
+// ak: Private Function Definition
 //=============================================================================
 
 // ak: Helper =================================================================
@@ -439,17 +439,17 @@ internal uint32_t _audio_buffer_read_frames_in_mixing_format(_Audio_Buffer *buff
             if (estimated_input_frame_count == 0) estimated_input_frame_count = 1; // Make sure at least one input frame is read
             if (estimated_input_frame_count > inputBufferFrameCap) estimated_input_frame_count = inputBufferFrameCap;
             
-            ma_uint32 intput_frames_in_interanl_format_count = _audio_buffer_read_frames_in_internal_format(buffer, input_buffer, estimated_input_frame_count);
-            ma_uint64 input_frames_processed_this_iteration = intput_frames_in_interanl_format_count;
+            ma_uint32 input_frames_in_internal_format_count = _audio_buffer_read_frames_in_internal_format(buffer, input_buffer, estimated_input_frame_count);
+            ma_uint64 input_frames_processed_this_iteration = input_frames_in_internal_format_count;
             ma_uint64 outputFramesProcessedThisIteration = outputFramesToProcessThisIteration;
             ma_data_converter_process_pcm_frames(&buffer->converter, input_buffer, &input_frames_processed_this_iteration, runningFramesOut, &outputFramesProcessedThisIteration);
             total_output_frames_processed += (ma_uint32)outputFramesProcessedThisIteration;
             
-            if (intput_frames_in_interanl_format_count > input_frames_processed_this_iteration)
+            if (input_frames_in_internal_format_count > input_frames_processed_this_iteration)
             {
                 // ak: getting here means the estimated input frame count was
                 // overestimated. The residual needs be stored for later use
-                ma_uint64 residual_frame_count = intput_frames_in_interanl_format_count - input_frames_processed_this_iteration;
+                ma_uint64 residual_frame_count = input_frames_in_internal_format_count - input_frames_processed_this_iteration;
                 
                 // ak: a safety check to make sure the capacity of the residual cache is not exceeded
                 if (residual_frame_count > AUDIO_BUFFER_RESIDUAL_CAPACITY)
@@ -459,7 +459,7 @@ internal uint32_t _audio_buffer_read_frames_in_mixing_format(_Audio_Buffer *buff
                 mem_copy(buffer->converter_residual, input_buffer + input_frames_processed_this_iteration*bpf, (size_t)(residual_frame_count*bpf));
             }
             
-            if (intput_frames_in_interanl_format_count < estimated_input_frame_count) break;  // reached the end of the sound
+            if (input_frames_in_internal_format_count < estimated_input_frame_count) break;  // reached the end of the sound
         }
     }
     
@@ -1066,7 +1066,7 @@ internal Audio_Sound audio_sound_alias_load(Audio_Sound source)
             _buffer->size_in_frames = _source_buffer->size_in_frames;
             _buffer->data = _source_buffer->data;
             
-            // Initalize the buffer as if it was new
+            // Initialize the buffer as if it was new
             _buffer->volume = 1.0f;
             _buffer->pitch = 1.0f;
             _buffer->pan = 0.0f; // Center
@@ -2026,7 +2026,7 @@ internal void audio_processor_mixed_detach(Audio_Callback process)
     ma_mutex_unlock(&_audio_state->system.lock);
 }
 
-// ak: Audio Buffer Managment =================================================
+// ak: Audio Buffer Management ================================================
 
 // ak: audio buffer type management
 

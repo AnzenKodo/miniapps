@@ -181,7 +181,7 @@ internal Render_Handle _render_opengl_handle_from_tex2d(_Render_Opengl_Tex_2D *t
 internal _Render_Opengl_Tex_2D *_render_opengl_tex2d_from_handle(Render_Handle handle);
 internal _Render_Opengl_Format_Info _render_opengl_format_info_from_tex2d_format(Render_Tex_2D_Format format);
 
-// ak: Internal OpneGL functions ==============================================
+// ak: Internal OpenGL functions ==============================================
 
 // ak: layer initialization and cleanup
 internal void _render_opengl_init(void);

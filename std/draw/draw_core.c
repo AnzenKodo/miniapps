@@ -3,16 +3,16 @@
 
 internal void draw_begin_frame(void)
 {
-    if(_draw_contex == NULL)
+    if(_draw_context == NULL)
     {
         Arena *arena = arena_alloc();
-        _draw_contex = arena_push(arena, _Draw_Contex, 1);
-        _draw_contex->arena = arena;
-        _draw_contex->arena_frame_start_pos = arena_pos(arena);
+        _draw_context = arena_push(arena, _Draw_Context, 1);
+        _draw_context->arena = arena;
+        _draw_context->arena_frame_start_pos = arena_pos(arena);
     }
-    arena_pop_to(_draw_contex->arena, _draw_contex->arena_frame_start_pos);
-    _draw_contex->free_bucket_selection = NULL;
-    _draw_contex->top_bucket = NULL;
+    arena_pop_to(_draw_context->arena, _draw_context->arena_frame_start_pos);
+    _draw_context->free_bucket_selection = NULL;
+    _draw_context->top_bucket = NULL;
 }
 
 internal void draw_submit_bucket(Wl_Window window, Render_Handle r_window, Draw_Bucket *bucket)
@@ -25,7 +25,7 @@ internal void draw_submit_bucket(Wl_Window window, Render_Handle r_window, Draw_
 
 internal Draw_Bucket *draw_bucket_make(void)
 {
-    Draw_Bucket *bucket = arena_push(_draw_contex->arena, Draw_Bucket, 1);
+    Draw_Bucket *bucket = arena_push(_draw_context->arena, Draw_Bucket, 1);
     bucket->top_tex_2d_sample_kind = &draw_nil_tex_2d_sample_kind;
     bucket->top_xform_2d = &draw_nil_xform_2d;
     bucket->top_clip = &draw_nil_clip;
@@ -35,32 +35,32 @@ internal Draw_Bucket *draw_bucket_make(void)
 
 internal void draw_bucket_push(Draw_Bucket *bucket)
 {
-    _Draw_Bucket_Selection_Node *node = _draw_contex->free_bucket_selection;
+    _Draw_Bucket_Selection_Node *node = _draw_context->free_bucket_selection;
     if(node)
     {
-        SLLStackPop(_draw_contex->free_bucket_selection);
+        SLLStackPop(_draw_context->free_bucket_selection);
     }
     else
     {
-        node = arena_push(_draw_contex->arena, _Draw_Bucket_Selection_Node, 1);
+        node = arena_push(_draw_context->arena, _Draw_Bucket_Selection_Node, 1);
     }
-    SLLStackPush(_draw_contex->top_bucket, node);
+    SLLStackPush(_draw_context->top_bucket, node);
     node->bucket = bucket;
 }
 
 internal void draw_bucket_pop(void)
 {
-  _Draw_Bucket_Selection_Node *node = _draw_contex->top_bucket;
-  SLLStackPop(_draw_contex->top_bucket);
-  SLLStackPush(_draw_contex->free_bucket_selection, node);
+  _Draw_Bucket_Selection_Node *node = _draw_context->top_bucket;
+  SLLStackPop(_draw_context->top_bucket);
+  SLLStackPush(_draw_context->free_bucket_selection, node);
 }
 
 internal Draw_Bucket *draw_bucket_top(void)
 {
     Draw_Bucket *bucket = NULL;
-    if(_draw_contex->top_bucket != NULL)
+    if(_draw_context->top_bucket != NULL)
     {
-        bucket = _draw_contex->top_bucket->bucket;
+        bucket = _draw_context->top_bucket->bucket;
     }
     return bucket;
 }
@@ -72,7 +72,7 @@ internal Draw_Bucket *draw_bucket_top(void)
 
 internal inline Render_Rect_2D_Inst *draw_rect(Rng2_F32 dst, Vec4_F32 color, float corner_radius, float border_thickness, float edge_softness)
 {
-    Arena *arena = _draw_contex->arena;
+    Arena *arena = _draw_context->arena;
     Draw_Bucket *bucket = draw_bucket_top();
     Render_Pass *pass = render_pass_from_kind(arena, &bucket->passes, Render_Pass_Kind_UI);
     Render_Pass_Params_UI *params = pass->params_ui;
@@ -113,7 +113,7 @@ internal inline Render_Rect_2D_Inst *draw_rect(Rng2_F32 dst, Vec4_F32 color, flo
 
 internal inline Render_Rect_2D_Inst *draw_img(Rng2_F32 dst, Rng2_F32 src, Render_Handle texture, Vec4_F32 color, float corner_radius, float border_thickness, float edge_softness)
 {
-    Arena *arena = _draw_contex->arena;
+    Arena *arena = _draw_context->arena;
     Draw_Bucket *bucket = draw_bucket_top();
     Render_Pass *pass = render_pass_from_kind(arena, &bucket->passes, Render_Pass_Kind_UI);
     Render_Pass_Params_UI *params = pass->params_ui;

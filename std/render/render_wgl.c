@@ -16,7 +16,7 @@ internal Void_Proc *_render_opengl_load_procedure(char *name)
 
 internal void _render_opengl_init(void)
 {
-    // Get device contex
+    // Get device context
     _render_wgl_state.hdc = GetDC(_wl_win32_state->handle);
     // Build pixel format descriptor
     int pf = 0;
@@ -32,9 +32,9 @@ internal void _render_opengl_init(void)
         DescribePixelFormat(_render_wgl_state.hdc, pf, sizeof(pfd), &pfd);
         SetPixelFormat(_render_wgl_state.hdc, pf, &pfd);
     }
-    // ak: Make bootstrap contex
-    HGLRC bootstrap_contex = wglCreateContext(_render_wgl_state.hdc);
-    wglMakeCurrent(_render_wgl_state.hdc, bootstrap_contex);
+    // ak: Make bootstrap context
+    HGLRC bootstrap_context = wglCreateContext(_render_wgl_state.hdc);
+    wglMakeCurrent(_render_wgl_state.hdc, bootstrap_context);
     // ak: Load extensions
     FNWGLCHOOSEPIXELFORMATARBPROC    *wglChoosePixelFormatARB    = (FNWGLCHOOSEPIXELFORMATARBPROC*)(void*)_render_opengl_load_procedure("wglChoosePixelFormatARB");
     FNWGLCREATECONTEXTATTRIBSARBPROC *wglCreateContextAttribsARB = (FNWGLCREATECONTEXTATTRIBSARBPROC*)(void*)_render_opengl_load_procedure("wglCreateContextAttribsARB");
@@ -55,7 +55,7 @@ internal void _render_opengl_init(void)
         UINT num_formats = 0;
         wglChoosePixelFormatARB(_render_wgl_state.hdc, pf_attribs_i, 0, 1, &pf, &num_formats);
     }
-    // ak: make real OpenGl contex
+    // ak: make real OpenGl context
     if (pf)
     {
         int context_attribs[] =
@@ -65,20 +65,20 @@ internal void _render_opengl_init(void)
             WGL_CONTEXT_FLAGS_ARB, WGL_CONTEXT_DEBUG_BIT_ARB,
             0
         };
-        HGLRC real_contex = wglCreateContextAttribsARB(_render_wgl_state.hdc, bootstrap_contex, context_attribs);
-        _render_wgl_state.contex = real_contex;
+        HGLRC real_context = wglCreateContextAttribsARB(_render_wgl_state.hdc, bootstrap_context, context_attribs);
+        _render_wgl_state.context = real_context;
     }
     // ak: clean up bootstrap context
     wglMakeCurrent(_render_wgl_state.hdc, 0);
-    wglDeleteContext(bootstrap_contex);
-    wglMakeCurrent(_render_wgl_state.hdc, _render_wgl_state.contex);
+    wglDeleteContext(bootstrap_context);
+    wglMakeCurrent(_render_wgl_state.hdc, _render_wgl_state.context);
     wglSwapIntervalEXT(1);
 }
 
 internal void _render_opengl_deinit(void)
 {
     ReleaseDC(_wl_win32_state->handle, _render_wgl_state.hdc);
-    wglDeleteContext(_render_wgl_state.contex);
+    wglDeleteContext(_render_wgl_state.context);
 }
 
 internal void _render_opengl(void)

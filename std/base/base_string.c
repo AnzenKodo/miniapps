@@ -1,10 +1,10 @@
-// ak: External Include
+// ak: Vendor Include
 //=============================================================================
 
-#if !defined(XXH_IMPLEMENTATION)
-#   define XXH_IMPLEMENTATION
-#   include "./external/xxhash.h"
-#endif
+#define XXH_IMPLEMENTATION
+#define XXH_INLINE_ALL
+#define XXH_STATIC_LINKING_ONLY
+#include "./vendor/xxhash.h"
 
 // ak: Character Classification & Conversion Functions
 //=============================================================================

@@ -56,8 +56,8 @@ struct _Draw_Bucket_Selection_Node
     Draw_Bucket *bucket;
 };
 
-typedef struct _Draw_Contex _Draw_Contex;
-struct _Draw_Contex
+typedef struct _Draw_Context _Draw_Context;
+struct _Draw_Context
 {
     Arena *arena;
     size_t arena_frame_start_pos;
@@ -97,7 +97,7 @@ internal void draw_text(Font_Tag font, float size, float base_align_px, float ta
 // ak: Globals
 //=============================================================================
 
-global _Draw_Contex *_draw_contex = 0;
+global _Draw_Context *_draw_context = 0;
 read_only global _Draw_Tex_2D_Sample_Kind_Node draw_nil_tex_2d_sample_kind = {
     0, Render_Tex_2D_Sample_Kind_Nearest
 };
