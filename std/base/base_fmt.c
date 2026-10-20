@@ -7,71 +7,53 @@
 // ak: FPrint
 //=============================================================================
 
-internal uint64_t fmt_fprint(Fs_File file, const char *string)
+internal size_t fmt_fprint(Fs_File file, Str8 string)
 {
-    uint64_t length = cstr8_length((uint8_t *)string);
-    fs_file_write_append_raw(file, (char *)string, length);
-    return length;
+    fs_file_write_append_raw(file, string.cstr, string.length);
+    return string.length;
 }
-internal uint64_t fmt_fprintln(Fs_File file, const char *string)
+internal size_t fmt_fprintln(Fs_File file, Str8 string)
 {
-    uint64_t length = cstr8_length((uint8_t *)string);
     fmt_fprint(file, string);
-    fmt_fprint(file, "\n");
-    return length;
+    fmt_fprint(file, str8("\n"));
+    return string.length;
 }
-internal uint64_t fmt_vfprintf(Fs_File file, const char *format, va_list args)
+internal size_t fmt_vfprintf(Fs_File file, const char *format, va_list args)
 {
     Arena_Temp scratch = arena_scratch_begin(NULL, 0);
-    uint64_t written = 0;
-    va_list args_copy;
-    va_copy(args_copy, args);
-        int32_t needed = fmt_vsnprintf(NULL, 0, format, args_copy) + 1;
-    va_end(args_copy);
-    if (needed > 0)
-    {
-        char *buffer = arena_push(scratch.arena, char, needed);
-        va_copy(args_copy, args);
-            written = fmt_vsprintf(buffer, format, args_copy);
-        va_end(args_copy);
-        fmt_fprint(file, buffer);
-    }
+    Str8 string = str8fv(scratch.arena, format, args);
+    fmt_fprint(file, string);
     arena_scratch_end(scratch);
-    return written;
+    return string.size;
 }
-internal uint64_t fmt_fprintf(Fs_File file, const char *format, ...)
+internal size_t fmt_fprintf(Fs_File file, const char *format, ...)
 {
-    uint64_t written = 0;
+    size_t written = 0;
     va_list args;
     va_start(args, format);
         written = fmt_vfprintf(file, format, args);
     va_end(args);
     return written;
 }
-internal uint64_t fmt_vfprintfln(Fs_File file, const char *format, va_list args)
+internal size_t fmt_vfprintfln(Fs_File file, const char *format, va_list args)
 {
     Arena_Temp scratch = arena_scratch_begin(NULL, 0);
-    uint64_t written = 0;
+    size_t written = 0;
     va_list args_copy;
     va_copy(args_copy, args);
-        int32_t needed = fmt_vsnprintf(NULL, 0, format, args_copy) + 2;
+        size_t needed = fmt_vsnprintf(NULL, 0, format, args) + 1;
+        char *cstr = arena_push_nz(scratch.arena, char, needed+1);
+        written = fmt_vsnprintf(cstr, needed, format, args_copy);
+        cstr[written] = '\n';
+        cstr[written+1] = '\0';
+        fmt_fprint(file, str8_from_cstr(cstr));
     va_end(args_copy);
-    if (needed > 0)
-    {
-        char *buffer = arena_push(scratch.arena, char, needed);
-        va_copy(args_copy, args);
-            written = fmt_vsprintf(buffer, format, args_copy);
-        va_end(args_copy);
-        buffer[written] = '\n';
-        buffer[written+1] = '\0';
-        fmt_fprint(file, buffer);
-    }
     arena_scratch_end(scratch);
     return written;
 }
-internal uint64_t fmt_fprintfln(Fs_File file, const char *format, ...)
+internal size_t fmt_fprintfln(Fs_File file, const char *format, ...)
 {
-    uint64_t written = 0;
+    size_t written = 0;
     va_list args;
     va_start(args, format);
         written = fmt_vfprintfln(file, format, args);
@@ -82,11 +64,11 @@ internal uint64_t fmt_fprintfln(Fs_File file, const char *format, ...)
 // ak: Print
 //=============================================================================
 
-internal void fmt_print(const char *string)
+internal void fmt_print(Str8 string)
 {
     fmt_fprint(OS_STDOUT, string);
 }
-internal void fmt_println(const char *string)
+internal void fmt_println(Str8 string)
 {
     fmt_fprintln(OS_STDOUT, string);
 }
@@ -116,11 +98,11 @@ internal void fmt_printfln(const char *format, ...)
 // ak: EPrint
 //=============================================================================
 
-internal void fmt_eprint(const char *string)
+internal void fmt_eprint(Str8 string)
 {
     fmt_fprint(OS_STDERR, string);
 }
-internal void fmt_eprintln(const char *string)
+internal void fmt_eprintln(Str8 string)
 {
     fmt_fprintln(OS_STDOUT, string);
 }
