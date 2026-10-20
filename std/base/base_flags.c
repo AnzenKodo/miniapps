@@ -789,7 +789,7 @@ internal void flags_print_help(void)
                         fmt_printf("\"%.*s\"", str8_varg(default_array->v[i]));
                         if (default_array->length-1 != i)
                         {
-                            fmt_print(" ");
+                            fmt_print(str8(" "));
                         }
                     }
                     fmt_printfln(")");
@@ -807,7 +807,7 @@ internal void flags_print_help(void)
                         fmt_printf("%ld", default_array->v[i]);
                         if (default_array->length-1 != i)
                         {
-                            fmt_print(" ");
+                            fmt_print(str8(" "));
                         }
                     }
                     fmt_printfln(")");
@@ -825,7 +825,7 @@ internal void flags_print_help(void)
                         fmt_printf("%lu", default_array->v[i]);
                         if (default_array->length-1 != i)
                         {
-                            fmt_print(" ");
+                            fmt_print(str8(" "));
                         }
                     }
                     fmt_printfln(")");
@@ -843,7 +843,7 @@ internal void flags_print_help(void)
                         fmt_printf("%f", default_array->v[i]);
                         if (default_array->length-1 != i)
                         {
-                            fmt_print(" ");
+                            fmt_print(str8(" "));
                         }
                     }
                     fmt_printfln(")");
