@@ -1,8 +1,8 @@
 //-----------------------------------------------------------------------------
 // Reference:
 // - By Ramon Santamaria:
-//      - https://github.com/raysan5/raudio/blob/master/src/raudio.h
-//      - https://github.com/raysan5/raudio
+//      - https://github.com/raysan5/raudio/blob/711c86eae17db9a94af575f7a5b496244b48b22d/src/raudio.h
+//      - https://github.com/raysan5/raudio/tree/811c150fe97a2abb8ec67857dc52e022bfaa4e43
 //-----------------------------------------------------------------------------
 
 #ifndef AUDIO_h

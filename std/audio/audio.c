@@ -132,12 +132,14 @@ internal uint32_t _audio_buffer_read_frames_in_mixing_format(_Audio_Buffer *buff
 internal void _audio_ma_log(void *user_data, ma_uint32 level, const char *message)
 {
     Unused(user_data);
+    Str8 msg = str8_from_cstr((char *)message);
+    msg = str8_chop(msg, 1);
     switch(level)
     {
-        case MA_LOG_LEVEL_DEBUG:   { LogDebug(g_log, str8(message)); } break;
-        case MA_LOG_LEVEL_INFO:    { LogInfo(g_log,  str8(message)); } break;
-        case MA_LOG_LEVEL_WARNING: { LogWarn(g_log,  str8(message)); } break;
-        case MA_LOG_LEVEL_ERROR:   { LogError(g_log, str8(message)); } break;
+        case MA_LOG_LEVEL_DEBUG:   { LogTrace(Debug, msg); } break;
+        case MA_LOG_LEVEL_INFO:    { LogTrace(Info, msg); } break;
+        case MA_LOG_LEVEL_WARNING: { LogTrace(Warn, msg); } break;
+        case MA_LOG_LEVEL_ERROR:   { LogTrace(Error, msg); } break;
     }
 }
 
@@ -507,7 +509,7 @@ internal void audio_init(void)
     ma_result result = ma_context_init(NULL, 0, &context_config, &_audio_state->system.context);
     if (result != MA_SUCCESS)
     {
-        LogWarnF(g_log, "Audio: failed to initialize context");
+        LogTraceF(Warn, "AUDIO: failed to initialize context");
     }
     else
     {
@@ -530,14 +532,14 @@ internal void audio_init(void)
         result = ma_device_init(&_audio_state->system.context, &config, &_audio_state->system.device);
         if (result != MA_SUCCESS)
         {
-            LogWarnF(g_log, "Audio: failed to initialize playback device");
+            LogTraceF(Warn, "AUDIO: failed to initialize playback device");
             ma_context_uninit(&_audio_state->system.context);
         }
         else
         {
             if (ma_mutex_init(&_audio_state->system.lock) != MA_SUCCESS)
             {
-                LogWarnF(g_log, "Audio: failed to create mutex for mixing");
+                LogTraceF(Warn, "AUDIO: failed to create mutex for mixing");
                 ma_device_uninit(&_audio_state->system.device);
                 ma_context_uninit(&_audio_state->system.context);
             }
@@ -546,17 +548,17 @@ internal void audio_init(void)
                 result = ma_device_start(&_audio_state->system.device);
                 if (result != MA_SUCCESS)
                 {
-                    LogWarnF(g_log, "Audio: failed to start playback device");
+                    LogTraceF(Warn, "AUDIO: failed to start playback device");
                     ma_device_uninit(&_audio_state->system.device);
                     ma_context_uninit(&_audio_state->system.context);
                 }
                 
-                LogInfoF(g_log, "Audio: Device initialized successfully");
-                LogInfoF(g_log, "    > Backend:       miniaudio | %s", ma_get_backend_name(_audio_state->system.context.backend));
-                LogInfoF(g_log, "    > Format:        %s -> %s", ma_get_format_name(_audio_state->system.device.playback.format), ma_get_format_name(_audio_state->system.device.playback.internalFormat));
-                LogInfoF(g_log, "    > Channels:      %d -> %d", _audio_state->system.device.playback.channels, _audio_state->system.device.playback.internalChannels);
-                LogInfoF(g_log, "    > Sample rate:   %d -> %d", _audio_state->system.device.sampleRate, _audio_state->system.device.playback.internalSampleRate);
-                LogInfoF(g_log, "    > Periods size:  %d", _audio_state->system.device.playback.internalPeriodSizeInFrames*_audio_state->system.device.playback.internalPeriods);
+                LogTraceF(Info, "AUDIO: Device initialized successfully");
+                LogTraceF(Info, "    > Backend:       miniaudio | %s", ma_get_backend_name(_audio_state->system.context.backend));
+                LogTraceF(Info, "    > Format:        %s -> %s", ma_get_format_name(_audio_state->system.device.playback.format), ma_get_format_name(_audio_state->system.device.playback.internalFormat));
+                LogTraceF(Info, "    > Channels:      %d -> %d", _audio_state->system.device.playback.channels, _audio_state->system.device.playback.internalChannels);
+                LogTraceF(Info, "    > Sample rate:   %d -> %d", _audio_state->system.device.sampleRate, _audio_state->system.device.playback.internalSampleRate);
+                LogTraceF(Info, "    > Periods size:  %d", _audio_state->system.device.playback.internalPeriodSizeInFrames*_audio_state->system.device.playback.internalPeriods);
                 
                 _audio_state->system.is_ready = true;
             }
@@ -580,11 +582,11 @@ internal void audio_uninit(void)
         arena_free(_audio_state->arena);
         _audio_state = NULL;
         
-        LogInfoF(g_log, "Audio: Device closed successfully");
+        LogTraceF(Info, "AUDIO: Device closed successfully");
     }
     else
     {
-        LogInfoF(g_log, "Audio: Device could not be closed, not currently initialized");
+        LogTraceF(Info, "AUDIO: Device could not be closed, not currently initialized");
     }
 }
 
@@ -635,7 +637,7 @@ internal Audio_Wave audio_wave_load_from_memory(Str8 file_type, U8Array file_dat
         }
         else
         {
-            LogWarnF(g_log, "Audio_Wave: Failed to load WAV data");
+            LogTraceF(Warn, "AUDIO_WAVE: Failed to load WAV data");
         }
         drwav_uninit(&wav);
     }
@@ -656,7 +658,7 @@ internal Audio_Wave audio_wave_load_from_memory(Str8 file_type, U8Array file_dat
         }
         else
         {
-            LogWarnF(g_log, "Audio_Wave: Failed to load OGG data");
+            LogTraceF(Warn, "AUDIO_WAVE: Failed to load OGG data");
         }
     }
     else if (str8_match(file_type, str8("mp3"), Str_Match_Flag_CaseInsensitive))
@@ -675,7 +677,7 @@ internal Audio_Wave audio_wave_load_from_memory(Str8 file_type, U8Array file_dat
         }
         else
         {
-            LogWarnF(g_log, "Audio_Wave: Failed to load MP3 data");
+            LogTraceF(Warn, "AUDIO_WAVE: Failed to load MP3 data");
         }
     }
     else if (str8_match(file_type, str8("qoa"), Str_Match_Flag_CaseInsensitive))
@@ -693,7 +695,7 @@ internal Audio_Wave audio_wave_load_from_memory(Str8 file_type, U8Array file_dat
         }
         else
         {
-            LogWarnF(g_log, "Audio_Wave: Failed to load QOA data");
+            LogTraceF(Warn, "AUDIO_WAVE: Failed to load QOA data");
         }
     }
     else if (str8_match(file_type, str8("flac"), Str_Match_Flag_CaseInsensitive))
@@ -709,15 +711,15 @@ internal Audio_Wave audio_wave_load_from_memory(Str8 file_type, U8Array file_dat
         }
         else
         {
-            LogWarnF(g_log, "Audio_Wave: Failed to load FLAC data");
+            LogTraceF(Warn, "AUDIO_WAVE: Failed to load FLAC data");
         }
     }
     else
     {
-        LogWarnF(g_log, "Audio_Wave: Data format not supported");
+        LogTraceF(Warn, "AUDIO_WAVE: Data format not supported");
     }
     
-    LogInfoF(g_log, "Audio_Wave: Data loaded successfully (%i Hz, %i bit, %i channels)", wave.sample_rate, wave.sample_size, wave.channels);
+    LogTraceF(Info, "AUDIO_WAVE: Data loaded successfully (%i Hz, %i bit, %i channels)", wave.sample_rate, wave.sample_size, wave.channels);
     
     return wave;
 }
@@ -776,10 +778,10 @@ internal void audio_wave_format_convert(Audio_Wave *wave, uint32_t sample_rate, 
             wave->data = data;
         } else {
             arena_clear(wave->arena);
-            LogWarnF(g_log, "Audio_Wave: Failed format conversion");
+            LogTraceF(Warn, "AUDIO_WAVE: Failed format conversion");
         }
     } else {
-        LogWarnF(g_log, "Audio_Wave: Failed to get frame count for format conversion");
+        LogTraceF(Warn, "AUDIO_WAVE: Failed to get frame count for format conversion");
     }
 }
 
@@ -816,7 +818,7 @@ internal void audio_wave_crop(Audio_Wave *wave, size_t init_frame, size_t final_
     }
     else
     {
-        LogWarnF(g_log, "Audio_Wave: Crop range out of bounds");
+        LogTraceF(Warn, "AUDIO_WAVE: Crop range out of bounds");
     }
 }
 
@@ -864,7 +866,7 @@ internal bool audio_wave_export_to_file(Audio_Wave wave, Str8 file_name)
         }
         else
         {
-            LogWarnF(g_log, "Audio: Wave data must be 16 bit per sample for QOA format export");
+            LogTraceF(Warn, "AUDIO: Wave data must be 16 bit per sample for QOA format export");
         }
     }
     else if (str8_match(file_type, str8("raw"), Str_Match_Flag_CaseInsensitive))
@@ -876,11 +878,11 @@ internal bool audio_wave_export_to_file(Audio_Wave wave, Str8 file_name)
     
     if (result)
     {
-        LogInfoF(g_log, "Audio_Wave: [%s8] Wave data exported successfully", file_name);
+        LogTraceF(Info, "AUDIO_WAVE: [%s8] Wave data exported successfully", file_name);
     }
     else
     {
-        LogWarnF(g_log, "Audio_Wave: [%s8] Failed to export wave data", file_name);
+        LogTraceF(Warn, "AUDIO_WAVE: [%s8] Failed to export wave data", file_name);
     }
     
     return result;
@@ -995,7 +997,7 @@ internal Audio_Sound audio_sound_load_from_wave(Audio_Wave wave)
         ma_uint32 frame_count = (ma_uint32)ma_convert_frames(NULL, 0, (ma_format)AUDIO_DEVICE_FORMAT, AUDIO_DEVICE_CHANNELS, _audio_state->system.device.sampleRate, NULL, frame_count_in, format_in, wave.channels, wave.sample_rate);
         if (frame_count == 0)
         {
-            LogWarnF(g_log, "Audio_Sound: Failed to get frame count for format conversion");
+            LogTraceF(Warn, "AUDIO_SOUND: Failed to get frame count for format conversion");
         }
         
         Audio_Buffer buffer = audio_buffer_alloc(AUDIO_DEVICE_FORMAT, AUDIO_DEVICE_CHANNELS, _audio_state->system.device.sampleRate, frame_count, Audio_Buffer_Usage_Static);
@@ -1006,7 +1008,7 @@ internal Audio_Sound audio_sound_load_from_wave(Audio_Wave wave)
             frame_count = (ma_uint32)ma_convert_frames(_buffer->data, frame_count, (ma_format)AUDIO_DEVICE_FORMAT, AUDIO_DEVICE_CHANNELS, _audio_state->system.device.sampleRate, wave.data, frame_count_in, format_in, wave.channels, wave.sample_rate);
             if (frame_count == 0)
             {
-                LogWarnF(g_log, "Audio_Sound: Failed format conversion");
+                LogTraceF(Warn, "AUDIO_SOUND: Failed format conversion");
             }
             
             sound.frame_count = frame_count;
@@ -1017,7 +1019,7 @@ internal Audio_Sound audio_sound_load_from_wave(Audio_Wave wave)
         }
         else
         {
-            LogWarnF(g_log, "Audio_Sound: Failed to create buffer");
+            LogTraceF(Warn, "AUDIO_SOUND: Failed to create buffer");
         }
     }
     return sound;
@@ -1042,14 +1044,14 @@ internal bool audio_sound_is_valid(Audio_Sound sound)
 internal void audio_sound_unload(Audio_Sound sound)
 {
     audio_buffer_free(sound.stream.buffer);
-    LogInfoF(g_log, "Audio_Sound: Unloaded sound data from RAM");
+    LogTraceF(Info, "AUDIO_SOUND: Unloaded sound data from RAM");
 }
 
 internal Audio_Sound audio_sound_alias_load(Audio_Sound source)
 {
     if (audio_buffer_is_zero(source.stream.buffer))
     {
-        LogWarnF(g_log, "Audio_Buffer: buffer is zero");
+        LogTraceF(Warn, "AUDIO_BUFFER: buffer is zero");
         return StructZeroType(Audio_Sound);
     }
     
@@ -1077,7 +1079,7 @@ internal Audio_Sound audio_sound_alias_load(Audio_Sound source)
         }
         else
         {
-            LogWarnF(g_log, "Audio_Sound: Failed to create buffer");
+            LogTraceF(Warn, "AUDIO_SOUND: Failed to create buffer");
         }
     }
     
@@ -1267,21 +1269,21 @@ internal Audio_Music audio_music_load(Str8 file_name)
     }
     else
     {
-        LogWarnF(g_log, "Audio_Stream: [%s8] File format not supported", file_name);
+        LogTraceF(Warn, "AUDIO_STREAM: [%s8] File format not supported", file_name);
     }
     
     if (!music_loaded)
     {
-        LogWarnF(g_log, "Audio_Stream: [%s8] Music file could not be opened", file_name);
+        LogTraceF(Warn, "AUDIO_STREAM: [%s8] Music file could not be opened", file_name);
     }
     else
     {
         // Show some music stream info
-        LogInfoF(g_log, "Audio_Music: [%s8] Music file loaded successfully", file_name);
-        LogInfoF(g_log, "    > Sample rate:   %i Hz", music.stream.sample_rate);
-        LogInfoF(g_log, "    > Sample size:   %i bits", music.stream.sample_size);
-        LogInfoF(g_log, "    > Channels:      %i (%s)", music.stream.channels, (music.stream.channels == 1)? "Mono" : (music.stream.channels == 2)? "Stereo" : "Multi");
-        LogInfoF(g_log, "    > Total frames:  %i", music.frame_count);
+        LogTraceF(Info, "AUDIO_MUSIC: [%s8] Music file loaded successfully", file_name);
+        LogTraceF(Info, "    > Sample rate:   %i Hz", music.stream.sample_rate);
+        LogTraceF(Info, "    > Sample size:   %i bits", music.stream.sample_size);
+        LogTraceF(Info, "    > Channels:      %i (%s)", music.stream.channels, (music.stream.channels == 1)? "Mono" : (music.stream.channels == 2)? "Stereo" : "Multi");
+        LogTraceF(Info, "    > Total frames:  %i", music.frame_count);
     }
     
     return music;
@@ -1401,19 +1403,19 @@ internal Audio_Music audio_music_from_memory_load(Str8 file_type, const uint8_t 
             drflac_free(context, NULL);
         }
     }
-    else LogWarnF(g_log, "Audio_Stream: Data format not supported");
+    else LogTraceF(Warn, "AUDIO_STREAM: Data format not supported");
 
     if (!music_loaded)
     {
-        LogWarnF(g_log, "Audio_Stream: Music data could not be loaded");
+        LogTraceF(Warn, "AUDIO_STREAM: Music data could not be loaded");
     }
     else
     {
-        LogInfoF(g_log, "Audio_Music: Music data loaded successfully");
-        LogInfoF(g_log, "    > Sample rate:   %i Hz", music.stream.sample_rate);
-        LogInfoF(g_log, "    > Sample size:   %i bits", music.stream.sample_size);
-        LogInfoF(g_log, "    > Channels:      %i (%s)", music.stream.channels, (music.stream.channels == 1)? "Mono" : (music.stream.channels == 2)? "Stereo" : "Multi");
-        LogInfoF(g_log, "    > Total frames:  %i", music.frame_count);
+        LogTraceF(Info, "AUDIO_MUSIC: Music data loaded successfully");
+        LogTraceF(Info, "    > Sample rate:   %i Hz", music.stream.sample_rate);
+        LogTraceF(Info, "    > Sample size:   %i bits", music.stream.sample_size);
+        LogTraceF(Info, "    > Channels:      %i (%s)", music.stream.channels, (music.stream.channels == 1)? "Mono" : (music.stream.channels == 2)? "Stereo" : "Multi");
+        LogTraceF(Info, "    > Total frames:  %i", music.frame_count);
     }
     
     return music;
@@ -1735,9 +1737,9 @@ Audio_Stream audio_stream_load(uint32_t sample_rate, uint32_t sample_size, uint3
     {
         _Audio_Buffer *_buffer = HandleUnpack(_Audio_Buffer, stream.buffer);
         _buffer->looping = true;    // Always loop for streaming buffers
-        LogInfoF(g_log, "Audio_Stream: Initialized successfully (%i Hz, %i bit, %s)", stream.sample_rate, stream.sample_size, (stream.channels == 1)? "Mono" : "Stereo");
+        LogTraceF(Info, "AUDIO_STREAM: Initialized successfully (%i Hz, %i bit, %s)", stream.sample_rate, stream.sample_size, (stream.channels == 1)? "Mono" : "Stereo");
     }
-    else LogWarnF(g_log, "Audio_Stream: Failed to load audio buffer, stream could not be created");
+    else LogTraceF(Warn, "AUDIO_STREAM: Failed to load audio buffer, stream could not be created");
 
     return stream;
 }
@@ -1753,7 +1755,7 @@ internal bool audio_stream_is_valid(Audio_Stream stream)
 internal void audio_stream_unload(Audio_Stream stream)
 {
     audio_buffer_free(stream.buffer);
-    LogInfoF(g_log, "Audio_Stream: Unloaded audio stream data from RAM");
+    LogTraceF(Info, "AUDIO_STREAM: Unloaded audio stream data from RAM");
 }
 
 // ak: audio stream playback control
@@ -1829,11 +1831,11 @@ internal void audio_stream_update_in_locked_state(Audio_Stream stream, const voi
             }
             else
             {
-                LogWarnF(g_log, "Audio_Stream: Attempting to write too many frames to buffer");
+                LogTraceF(Warn, "AUDIO_STREAM: Attempting to write too many frames to buffer");
             }
         }
         else {
-            LogWarnF(g_log, "Audio_Stream: Buffer not available for updating");
+            LogTraceF(Warn, "AUDIO_STREAM: Buffer not available for updating");
         }
     }
 }
@@ -2097,7 +2099,7 @@ internal Audio_Buffer audio_buffer_alloc(Audio_Device_Format format, uint32_t ch
     }
     else
     {
-        LogWarnF(g_log, "Audio_Buffer: Failed to create data conversion pipeline");
+        LogTraceF(Warn, "AUDIO_BUFFER: Failed to create data conversion pipeline");
         audio_buffer_free(buffer);
     }
     return buffer;
