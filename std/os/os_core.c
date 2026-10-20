@@ -19,6 +19,8 @@ internal Str8 *os_program_path_get(void)
 
 internal int32_t os_main(void)
 {
-    g_log = log_alloc();
-    return base_main();
+    log_trace_g = log_alloc();
+    int exit_code = base_main();
+    log_free(log_trace_g);
+    return exit_code;
 }
