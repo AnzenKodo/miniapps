@@ -9,14 +9,28 @@
 #ifndef BASE_CORE_H
 #define BASE_CORE_H
 
-#if !defined(BUILD_DEBUG)
-#   define BUILD_DEBUG 0
-#endif
-
 // ak: External Includes
 //=============================================================================
 
 #include <stdarg.h>
+
+//~ ak: Build
+//=============================================================================
+
+#if !defined(BUILD_DEBUG)
+#   define BUILD_DEBUG 0
+#endif
+
+#if !defined(BUILD_VERSION)
+// NOTE(ak): __TIME__ is "hh:mm:ss", and the printed build command contains it.
+// Neovim's errorformat reads "hh:mm:ss" as file:line:col, so the quickfix list
+// gets a bogus entry. Using '-' instead of ':' avoids that.
+static const char BUILD_VERSION[] = {
+    __DATE__[0], __DATE__[1], __DATE__[2], __DATE__[3], __DATE__[4], __DATE__[5],
+    __DATE__[6], __DATE__[7], __DATE__[8], __DATE__[9], __DATE__[10], ' ',
+    __TIME__[0], __TIME__[1], '.', __TIME__[3], __TIME__[4], '.', __TIME__[6], __TIME__[7],
+    0 };
+#endif
 
 // ak: Code Keywords
 //=============================================================================

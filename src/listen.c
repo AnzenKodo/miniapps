@@ -83,6 +83,8 @@ internal void play_help_message(void)
     fmt_printfln("   %s [OPTIONS] <FILE>", program_name->cstr);
     fmt_println(str8("OPTIONS:"));
     flags_print_help();
+    fmt_println(str8("OPTIONS:"));
+    fmt_printfln("   %s", BUILD_VERSION);
 }
 
 internal int32_t base_main(void)

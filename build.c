@@ -73,65 +73,9 @@ global const char *help_message = "DESCRIPTION:\n"
 
 internal int32_t build_run(Str8 cmd);
 internal Str8 build_path(Build_Info *info);
+internal Str8 build_program_version_get();
 
 // ak: Compilers functions ====================================================
-
-internal void build_compile_msvc(Build_Info *info)
-{
-    str8_list_pushf(info->arena, &info->cmd, "setup_x64.bat & cl.exe %s", info->entry_point.cstr);
-    if (info->flags & Build_Flag_DryRun)
-    {
-        str8_list_pushf(info->arena, &info->cmd, " -Zs");
-    }
-    // ak: looks
-    str8_list_pushf(info->arena, &info->cmd, " -nologo -diagnostics:caret");
-    // ak: output
-    str8_list_pushf(info->arena, &info->cmd, " -Fo:"BUILD_DIR"\\ -Fe:");
-    str8_list_push(info->arena, &info->cmd, build_path(info));
-    // ak: debug
-    if (info->type != Build_Type_Release)
-    {
-        str8_list_pushf(info->arena, &info->cmd, " -Zi -Fd\""BUILD_DIR"\\vc140.pbd\" -DBUILD_DEBUG=1");
-    }
-    // ak: lock lang Version
-    str8_list_pushf(info->arena, &info->cmd, " -std:c11");
-    // ak: Optimization
-    if (info->type == Build_Type_Release)
-    {
-        str8_list_pushf(info->arena, &info->cmd, " -Ox -wd4711"); // Enable
-    }
-    else
-    {
-        str8_list_pushf(info->arena, &info->cmd,
-            " -Od"
-            " -Ob1 -wd4710" // ak: Disable inline functions and it's warnings
-        );
-    }
-    // ak: warnings
-    if (info->type != Build_Type_Release)
-    {
-        str8_list_pushf(info->arena, &info->cmd, " -W4 -Wall");
-    }
-    // ak: disable uselss warnings
-    str8_list_pushf(info->arena, &info->cmd,
-        " -wd4668"                 // ak: For macros magic
-        " -wd4464"                 // ak: Warning about '..' in path
-        " -wd4310 -wd4146 -wd4245" // ak: Cast conversion
-        " -wd4201"                 // ak: Nameless struct/union
-        " -wd4820"                 // ak: Struct padding
-        " -wd4061"                 // ak: Enum switch enumeration
-    );
-    // ak: security
-    str8_list_pushf(info->arena, &info->cmd,
-        " -Qspectre -wd5045"  // ak: Spectre variant 1 vulnerability
-        " -GS"                // ak: Canary insertion
-        " -guard:cf"          // ak: Control-flow protection
-    );
-    if (info->type != Build_Type_Debug && info->type != Build_Type_Release)
-    {
-        str8_list_pushf(info->arena, &info->cmd, " -fsanitize=address");
-    }
-}
 
 internal void build_compile_gcc_style_flags(Build_Info *info)
 {
@@ -209,6 +153,8 @@ internal void build_compile_gcc_style_flags(Build_Info *info)
     {
         str8_list_pushf(info->arena, &info->cmd, " -c");
     }
+    // ak: add version
+    str8_list_pushf(info->arena, &info->cmd, " -DBUILD_VERSION='\"%s8\"'", build_program_version_get());
 }
 
 internal void build_compile_gcc(Build_Info *info)
@@ -219,7 +165,6 @@ internal void build_compile_gcc(Build_Info *info)
     }
     else if (info->flags & Build_Flag_Cpp)
     {
-        
         str8_list_pushf(info->arena, &info->cmd, "g++");
     }
     else
@@ -252,10 +197,6 @@ internal void build_compile(Build_Info *info)
     {
         build_compile_clang(info);
     }
-    else if (Context_Compiler_CURRENT == Context_Compiler_Msvc)
-    {
-        build_compile_msvc(info);
-    }
     else
     {
         fmt_eprintf("Error: OS build compile is not supported.");
@@ -266,7 +207,7 @@ internal void build_compile(Build_Info *info)
 
 internal int32_t build_run_program(Build_Info *info)
 {
-    fmt_println("# Running ------------------------------------------------------------------- #");
+    fmt_println(str8("# Running ------------------------------------------------------------------- #"));
     Str8_List list = STRUCT_ZERO;
     if (info->flags & Build_Flag_MingW)
     {
@@ -294,11 +235,11 @@ internal int32_t build_compile_miniaudio(Build_Info *info)
     {
         if (info->flags & Build_Flag_Dynamic_Lib)
         {
-            fmt_println("# Compiling miniaudio Dynamic Library --------------------------------------- #");
+            fmt_println(str8("# Compiling miniaudio Dynamic Library --------------------------------------- #"));
         }
         else
         {
-            fmt_println("# Compiling miniaudio Static Library ---------------------------------------- #");
+            fmt_println(str8("# Compiling miniaudio Static Library ---------------------------------------- #"));
         }
         build_compile(info);
         str8_list_pushf(info->arena, &info->cmd, " -DMINIAUDIO_IMPLEMENTATION");
@@ -332,7 +273,7 @@ internal int32_t build_compile_run_metadesk(void)
     info.args = str8("std src");
     info.arena = scratch.arena;
     
-    fmt_println("# Compiling MetaDesk ------------------------------------------------------- #");
+    fmt_println(str8("# Compiling MetaDesk ------------------------------------------------------- #"));
     build_compile(&info);
     Str8 cmd = str8_list_join(info.arena, &info.cmd, NULL);
     result = build_run(cmd);
@@ -347,7 +288,7 @@ internal int32_t build_compile_run_metadesk(void)
 
 internal int32_t build_compile_program(Build_Info *info, Build_Info *ma_info)
 {
-    fmt_println("# Compiling Program --------------------------------------------------------- #");
+    fmt_println(str8("# Compiling Program --------------------------------------------------------- #"));
     int32_t result = 0;
     info->entry_point = str8f(info->arena, "src/%s8.c", info->name);
     build_compile(info);
@@ -493,7 +434,7 @@ internal int32_t base_main(void)
     }
     else
     {
-        fmt_println("# Build Output ============================================================== #");
+        fmt_println(str8("# Build Output ============================================================== #"));
         
         // ak: create build directory if not exists
         if (fs_dir_make(str8(BUILD_DIR)))
@@ -596,4 +537,9 @@ internal Str8 build_path(Build_Info *info)
     
     Str8 result = str8_list_join(info->arena, &list, NULL);
     return result;
+}
+
+internal Str8 build_program_version_get()
+{
+    return str8(BUILD_VERSION);
 }
