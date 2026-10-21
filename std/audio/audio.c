@@ -805,8 +805,7 @@ internal Audio_Wave audio_wave_copy(Audio_Wave wave)
 
 internal void audio_wave_crop(Audio_Wave *wave, size_t init_frame, size_t final_frame)
 {
-    if ((init_frame >= 0) &&
-        (init_frame < final_frame) &&
+    if ((init_frame < final_frame) &&
         (final_frame <= wave->frame_count))
     {
         size_t bytes_per_frame = wave->channels * (wave->sample_size / 8);
@@ -1696,7 +1695,7 @@ internal float audio_music_time_played_get(Audio_Music music)
         if (((uint32_t)frames_in_buffers > music.frame_count) && !music.looping) frames_in_buffers = music.frame_count;
         uint64_t frames_sent_to_mix = _buffer->frame_cursor_pos%sub_buffer_size;
         uint64_t frames_played = (frames_processed - frames_in_buffers + frames_sent_to_mix)%(size_t)music.frame_count;
-        if (frames_played < 0) frames_played += music.frame_count;
+        frames_played += music.frame_count;
         seconds_played = (float)frames_played/music.stream.sample_rate;
         ma_mutex_unlock(&_audio_state->system.lock);
     }

@@ -424,22 +424,22 @@ internal double ceil_f64(double x)
 
 internal float copysign_f32(float x, float y)
 {
-	int32_t ay, ay;
-	ay = *(int32_t *)&x;
-	ay = *(int32_t *)&y;
-	ay &= 0x7fffffff;
-	ay |= ay & 0x80000000;
-	return *(float *)&ay;
+	int xx, yy;
+	xx = *(int *)&x;
+	yy = *(int *)&y;
+	xx &= 0x7fffffff;
+	xx |= yy & 0x80000000;
+	return *(float *)&xx;
 }
 
 internal double copysign_f64(double x, double y)
 {
-    int64_t ay, ay;
-    ay = *(int64_t *)&x;
-    ay = *(int64_t *)&y;
-    ay &= 0x7fffffffffffffffLL;
-    ay |= ay & 0x8000000000000000LL;
-    return *(double *)&ay;
+    int64_t xx, yy;
+    xx = *(int64_t *)&x;
+    yy = *(int64_t *)&y;
+    xx &= 0x7fffffffffffffffLL;
+    xx |= yy & 0x8000000000000000LL;
+    return *(double *)&xx;
 }
 
 // ak: ak: Vector Ops
