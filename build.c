@@ -204,7 +204,10 @@ internal uint64_t build_run_program(Build_Info *info)
         str8_list_pushf(info->arena, &list, "WINEARCH=win64 wine ");
     }
     str8_list_push(info->arena, &list, build_path(info));
-    str8_list_pushf(info->arena, &list, " %.*s", str8_varg(info->args));
+    if (info->args.length > 0)
+    {
+        str8_list_pushf(info->arena, &list, " %.*s", str8_varg(info->args));
+    }
     return build_run_list(list);
 }
 
@@ -272,10 +275,12 @@ internal uint64_t build_compile_run_metadesk(void)
 internal uint64_t build_compile_program(Build_Info *info, Build_Info *ma_info)
 {
     Arena_Temp scratch = arena_scratch_begin(NULL, 0);
+    Arena *orig_arena = info->arena;
     fmt_println(str8("# Compiling Program --------------------------------------------------------- #"));
     uint64_t result = 0;
     info->entry_point = str8f(scratch.arena, "src/%s8.c", info->name);
     info->arena = scratch.arena;
+    info->cmd = StructZeroType(Str8_List);
     build_compile(info);
     if (!(info->flags & Build_Flag_DryRun))
     {
@@ -300,6 +305,8 @@ internal uint64_t build_compile_program(Build_Info *info, Build_Info *ma_info)
         }
     }
     result = build_run_list(info->cmd);
+    info->cmd = StructZeroType(Str8_List);
+    info->arena = orig_arena;
     arena_scratch_end(scratch);
     return result;
 }
@@ -310,7 +317,7 @@ global const char *help_message =
 "DESCRIPTION:\n"
 "   Build driver for compiling and running C projects.\n\n"
 "USAGE:\n"
-"   build [COMMAND] [TARGET] [CONFIG]\n\n"
+"   build [COMMAND] [TARGET] [CONFIG] [-- <args>]\n\n"
 "COMMANDS:\n"
 "   build                Compile target program(s) (default)\n"
 "   run                  Run target program (builds first if not present)\n"
@@ -322,137 +329,183 @@ global const char *help_message =
 "ARGUMENTS:\n"
 "   [TARGET]             Name of program in src/<name>.c (e.g. 'listen').\n"
 "                        Defaults to 'all' (builds every program in src/).\n"
-"   [CONFIG]             Build configuration: 'dev' (default) or 'release'.\n\n"
+"   [CONFIG]             Build configuration: 'dev' (default) or 'release'.\n"
+"   [-- <args>]          Pass all trailing arguments directly to target program.\n\n"
 "EXAMPLES:\n"
-"   ./build build                    Build all programs (dev)\n"
-"   ./build build listen             Build 'listen' program (dev)\n"
-"   ./build build listen release     Build 'listen' program (optimized release)\n"
-"   ./build run listen               Run 'listen' program\n"
-"   ./build build-run listen         Build and run 'listen'\n"
-"   ./build build-debugger listen    Build 'listen' for debugger\n";
+"   ./build build                         Build all programs (dev)\n"
+"   ./build build listen                  Build 'listen' program (dev)\n"
+"   ./build build listen release          Build 'listen' program (optimized release)\n"
+"   ./build run listen                    Run 'listen' program\n"
+"   ./build run listen -- --help          Run 'listen' with arguments\n"
+"   ./build build-run listen              Build and run 'listen'\n"
+"   ./build build-run listen -- --help    Build and run 'listen' with arguments\n"
+"   ./build build-debugger listen         Build 'listen' for debugger\n";
 
 internal uint64_t base_main(void)
 {
     Arena *arena = arena_alloc();
     
     Build_Info info = STRUCT_ZERO;
+    info.arena = arena;
     
     bool should_print_help = false;
     bool run_program = false;
     bool only_run_program = false;
     bool gen_meta_program = false;
     uint64_t exit_code = 0;
-    Str8 app_name = STRUCT_ZERO;
+    
+    Str8 cmd_arg = STRUCT_ZERO;
+    Str8 target_arg = STRUCT_ZERO;
+    Str8 config_arg = STRUCT_ZERO;
+    Str8 custom_args = STRUCT_ZERO;
     
     Str8_Array *args = term_args_get();
-    if (args->length >= 2)
+    for (uint64_t i = 1; i < args->length; i++)
     {
-        Str8 arg1 = args->v[1];
-        Str8 arg2 = STRUCT_ZERO;
-        Str8 arg3 = STRUCT_ZERO;
+        Str8 arg = args->v[i];
         
-        if (args->length >= 3)
-        { info.name = args->v[2]; }
-        else
-        { info.name = str8("all"); }
+        // ak: pass all trailing arguments directly with --
+        if (str8_match(arg, str8("--"), 0))
+        {
+            for (uint64_t j = i + 1; j < args->length; j++)
+            {
+                if (custom_args.length == 0)
+                {
+                    custom_args = args->v[j];
+                }
+                else
+                {
+                    custom_args = str8f(arena, "%s8 %s8", custom_args, args->v[j]);
+                }
+            }
+            break;
+        }
         
-        if (args->length >= 4)
+        if (str8_match(arg, str8("--mingw"), 0))
         {
-            arg3 = args->v[3];
+            info.flags |= Build_Flag_MingW;
+            continue;
         }
-        if (
-            str8_match(arg1, str8("help"), 0) ||
-            str8_match(arg1, str8("--help"), 0) ||
-            str8_match(arg1, str8("-h"), 0))
+        
+        if (cmd_arg.length == 0)
         {
-            should_print_help = true;
+            cmd_arg = arg;
         }
-        else if (str8_match(arg1, str8("build"), 0))
+        else if (target_arg.length == 0)
         {
-            if (str8_match(arg3, str8("release"), 0))
-            {
-                info.type = Build_Type_Release;
-            }
-            else
-            {
-                info.type = Build_Type_Dev;
-            }
+            target_arg = arg;
         }
-        else if (str8_match(arg1, str8("build-run"), 0))
+        else if (config_arg.length == 0)
         {
-            if (str8_match(arg3, str8("release"), 0))
-            {
-                info.type = Build_Type_Release;
-            }
-            else
-            {
-                info.type = Build_Type_Dev;
-            }
-            run_program = true;
-        }
-        else if (str8_match(arg1, str8("build-dry"), 0))
-        {
-            info.type = Build_Type_Dev;
-            info.flags |= Build_Flag_DryRun;
-        }
-        else if (str8_match(arg1, str8("build-debugger"), 0))
-        {
-            info.type = Build_Type_Debug;
-        }
-        else if (str8_match(arg1, str8("gen-meta"), 0))
-        {
-            gen_meta_program = true;
-        }
-        else if (str8_match(arg1, str8("run"), 0))
-        {
-            if (str8_match(arg3, str8("release"), 0))
-            {
-                info.type = Build_Type_Release;
-            }
-            else
-            {
-                info.type = Build_Type_Dev;
-            }
-            only_run_program = true;
+            config_arg = arg;
         }
         else
         {
-            fmt_printf("%s", help_message);
-            BuildLog(Error, "wrong option provided `%s8`.", arg1);
+            BuildLog(Error, "unexpected argument `%s8`.", arg);
             exit_code = 1;
         }
     }
-    else
+    
+    if (exit_code == 0)
     {
-        should_print_help = true;
-    }
-    if (args->length >= 3 && str8_match(args->v[2], str8("mingw"), 0))
-    {
-        info.flags |= Build_Flag_MingW;
+        if (cmd_arg.length == 0 ||
+            str8_match(cmd_arg, str8("help"), 0) ||
+            str8_match(cmd_arg, str8("--help"), 0) ||
+            str8_match(cmd_arg, str8("-h"), 0))
+        {
+            should_print_help = true;
+        }
+        else
+        {
+            info.name = (target_arg.length > 0) ? target_arg : str8("all");
+            
+            if (str8_match(cmd_arg, str8("build"), 0))
+            {
+                if (str8_match(config_arg, str8("release"), 0))
+                {
+                    info.type = Build_Type_Release;
+                }
+                else
+                {
+                    info.type = Build_Type_Dev;
+                }
+            }
+            else if (str8_match(cmd_arg, str8("build-run"), 0))
+            {
+                if (str8_match(config_arg, str8("release"), 0))
+                {
+                    info.type = Build_Type_Release;
+                }
+                else
+                {
+                    info.type = Build_Type_Dev;
+                }
+                run_program = true;
+            }
+            else if (str8_match(cmd_arg, str8("run"), 0))
+            {
+                if (str8_match(config_arg, str8("release"), 0))
+                {
+                    info.type = Build_Type_Release;
+                }
+                else
+                {
+                    info.type = Build_Type_Dev;
+                }
+                only_run_program = true;
+            }
+            else if (str8_match(cmd_arg, str8("build-dry"), 0))
+            {
+                info.type = Build_Type_Dev;
+                info.flags |= Build_Flag_DryRun;
+            }
+            else if (str8_match(cmd_arg, str8("build-debugger"), 0))
+            {
+                info.type = Build_Type_Debug;
+            }
+            else if (str8_match(cmd_arg, str8("gen-meta"), 0))
+            {
+                gen_meta_program = true;
+            }
+            else
+            {
+                fmt_printf("%s", help_message);
+                BuildLog(Error, "wrong option provided `%s8`.", cmd_arg);
+                exit_code = 1;
+            }
+        }
     }
     
-    if (only_run_program && !fs_file_path_exists(build_path(&info)))
+    info.args = custom_args;
+    
+    if (only_run_program || run_program)
     {
-        only_run_program = false;
-        run_program = true;
+        if (str8_match(info.name, str8("all"), 0))
+        {
+            fmt_printf("%s", help_message);
+            BuildLog(Error, "please specify a single program name.");
+            exit_code = 1;
+        }
+        else if (only_run_program && !fs_file_path_exists(build_path(&info)))
+        {
+            only_run_program = false;
+            run_program = true;
+        }
     }
     
     if (should_print_help)
     {
         fmt_printf("%s", help_message);
     }
+    else if (exit_code != 0)
+    {
+        // ak: error already reported
+    }
     else if (only_run_program)
     {
-        if (str8_match(info.name, str8("all"), 0))
-        {
-            BuildLog(Error, "please specify a single program name.");
-        }
-        else
-        {
-            exit_code = build_run_string(build_path(&info));
-        }
+        exit_code = build_run_program(&info);
     }
-    else if (exit_code == 0)
+    else
     {
         fmt_println(str8("# Build Output ============================================================== #"));
         
@@ -604,7 +657,7 @@ internal Str8 build_path(Build_Info *info)
     else if ((info->flags & Build_Flag_Dynamic_Lib) && Context_Os_CURRENT == Context_Os_Windows)
     {
         str8_list_pushf(info->arena, &list, ".dll");
-    } else if (Context_Os_CURRENT == Context_Os_Windows)
+    } else if (Context_Os_CURRENT == Context_Os_Windows || (info->flags & Build_Flag_MingW))
     {
         str8_list_pushf(info->arena, &list, ".exe");
     }
