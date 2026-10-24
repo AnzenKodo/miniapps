@@ -53,33 +53,7 @@ struct Build_Info
     Build_Flags flags;
 };
 
-// ak: Globals
-//=============================================================================
 
-global const char *help_message =
-"DESCRIPTION:\n"
-"   Build driver for compiling and running C projects.\n\n"
-"USAGE:\n"
-"   build [COMMAND] [TARGET] [CONFIG]\n\n"
-"COMMANDS:\n"
-"   build                Compile target program(s) (default)\n"
-"   run                  Run target program (builds first if not present)\n"
-"   build-run            Compile and run target program\n"
-"   build-dry            Check syntax without producing output files\n"
-"   build-debugger       Compile with full debug information (-ggdb -g3)\n"
-"   gen-meta             Generate code using MetaDesk metaprogram\n"
-"   help, -h, --help     Print this help message\n\n"
-"ARGUMENTS:\n"
-"   [TARGET]             Name of program in src/<name>.c (e.g. 'listen').\n"
-"                        Defaults to 'all' (builds every program in src/).\n"
-"   [CONFIG]             Build configuration: 'dev' (default) or 'release'.\n\n"
-"EXAMPLES:\n"
-"   ./build build                    Build all programs (dev)\n"
-"   ./build build listen             Build 'listen' program (dev)\n"
-"   ./build build listen release     Build 'listen' program (optimized release)\n"
-"   ./build run listen               Run 'listen' program\n"
-"   ./build build-run listen         Build and run 'listen'\n"
-"   ./build build-debugger listen    Build 'listen' for debugger\n";
 
 // ak: Functions
 //=============================================================================
@@ -331,6 +305,31 @@ internal uint64_t build_compile_program(Build_Info *info, Build_Info *ma_info)
 }
 
 // ak: Build Entry Point ======================================================
+
+global const char *help_message =
+"DESCRIPTION:\n"
+"   Build driver for compiling and running C projects.\n\n"
+"USAGE:\n"
+"   build [COMMAND] [TARGET] [CONFIG]\n\n"
+"COMMANDS:\n"
+"   build                Compile target program(s) (default)\n"
+"   run                  Run target program (builds first if not present)\n"
+"   build-run            Compile and run target program\n"
+"   build-dry            Check syntax without producing output files\n"
+"   build-debugger       Compile with full debug information (-ggdb -g3)\n"
+"   gen-meta             Generate code using MetaDesk metaprogram\n"
+"   help, -h, --help     Print this help message\n\n"
+"ARGUMENTS:\n"
+"   [TARGET]             Name of program in src/<name>.c (e.g. 'listen').\n"
+"                        Defaults to 'all' (builds every program in src/).\n"
+"   [CONFIG]             Build configuration: 'dev' (default) or 'release'.\n\n"
+"EXAMPLES:\n"
+"   ./build build                    Build all programs (dev)\n"
+"   ./build build listen             Build 'listen' program (dev)\n"
+"   ./build build listen release     Build 'listen' program (optimized release)\n"
+"   ./build run listen               Run 'listen' program\n"
+"   ./build build-run listen         Build and run 'listen'\n"
+"   ./build build-debugger listen    Build 'listen' for debugger\n";
 
 internal uint64_t base_main(void)
 {
