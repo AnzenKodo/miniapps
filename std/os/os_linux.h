@@ -19,6 +19,9 @@
 #include <time.h>
 #include <stdlib.h>
 #include <time.h>
+#include <spawn.h>
+#include <signal.h>
+#include <sys/wait.h>
 extern char **environ;
 
 //~ ak: Types
@@ -41,6 +44,19 @@ struct _Os_Linux_Walk
 #define OS_STDIN  STDIN_FILENO
 #define OS_STDOUT STDOUT_FILENO
 #define OS_STDERR STDERR_FILENO
+
+//~ ak: Macros
+//=============================================================================
+
+// ak: Linux Call Interruption Retry Helper
+#define LNX_RETRY_ON_EINTR(expr)             \
+(__extension__({                           \
+__typeof__(expr) __ret;                    \
+do {                                       \
+__ret = (expr);                          \
+} while ((__ret == -1) && errno == EINTR); \
+__ret;                                     \
+}))
 
 //~ ak: Functions
 //=============================================================================

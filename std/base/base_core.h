@@ -387,6 +387,6 @@ Axis_3d;
 // ak: Functions
 //=============================================================================
 
-internal int32_t base_main(void);
+internal uint64_t base_main(void);
 
 #endif // BASE_CORE_H

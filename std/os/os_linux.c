@@ -1,3 +1,16 @@
+// ak: State
+//=============================================================================
+
+typedef struct _Os_Linux_State _Os_Linux_State;
+struct _Os_Linux_State
+{
+    Arena *arena;
+    char **default_env;
+    size_t default_env_count;
+};
+
+global _Os_Linux_State _os_linux_state = STRUCT_ZERO;
+
 // ak: Helpers functions
 //=============================================================================
 
@@ -41,7 +54,7 @@ internal Fs_Properties _os_linux_properties_from_stat(struct stat *s)
     return props;
 }
 
-// ak: Os Core Functions
+//~ ak: Os Core Functions
 //=============================================================================
 
 // ak: Memory =================================================================
@@ -74,8 +87,7 @@ internal void os_sleep_ms(uint32_t millisec)
     usleep(millisec*Thousand(1));
 }
 
-// ak: Environment Variable
-//=============================================================================
+// ak: Environment Variable ===================================================
 
 internal bool os_is_env_exists(Str8 name)
 {
@@ -111,16 +123,16 @@ internal Str8 os_env_get(Str8 name)
     return result;
 }
 
-// ak: OS Entry Points
-//=============================================================================
+//~ ak: OS Entry Points =======================================================
 
 int main(int argc, char *argv[])
 {
-    Arena_Temp scratch = arena_scratch_begin(NULL, 0);
+    // ak: set up dynamically allocated state
+    _os_linux_state.arena = arena_alloc();
     
     // ak: make array of args
     {
-        _os_core_state.args = array_alloc(scratch.arena, Str8_Array, (size_t)argc, 0);
+        _os_core_state.args = array_alloc(_os_linux_state.arena, Str8_Array, (size_t)argc, 0);
         for (int i = 0; i < argc; i++)
         {
             Str8 str = str8_from_cstr(argv[i]);
@@ -141,10 +153,32 @@ int main(int argc, char *argv[])
                 Str8 home = os_env_get(str8("HOME"));
                 if (home.length != 0)
                 {
-                    _os_core_state.data_home = str8f(scratch.arena, "%s8/.local/share", home);
+                    _os_core_state.data_home = str8f(_os_linux_state.arena, "%s8/.local/share", home);
                 }
             }
         }
+    }
+    
+    // ak: get system/process info
+    Process_Info *info = &_os_core_state.process_info;
+    info->pid = (uint32_t)getpid();
+    
+    // ak: cache default environment
+    {
+        uint64_t env_count = 0;
+        for(; __environ[env_count] != 0; env_count += 1) {}
+
+        char **default_env = arena_push(_os_linux_state.arena, char *, env_count+1);
+        for EachIndex(idx, env_count)
+        {
+            Str8 entry = str8_copy(_os_linux_state.arena, str8_from_cstr(__environ[idx]));
+            default_env[idx] = (char *)entry.cstr;
+            str8_list_push(_os_linux_state.arena, &_os_core_state.process_info.environment, entry);
+        }
+        default_env[env_count] = 0;
+
+        _os_linux_state.default_env_count = env_count;
+        _os_linux_state.default_env       = default_env;
     }
     
     // ak: os entry point
@@ -466,4 +500,272 @@ internal bool term_is_terminal(Fs_File file)
 {
     int result = isatty(file);
     return result;
+}
+
+//~ ak: Processes =============================================================
+
+//- ak: Process Info
+
+internal Str8 current_path_get(Arena *arena)
+{
+    char *cwdir = getcwd(0, 0);
+    Str8 string = str8_copy(arena, str8_from_cstr(cwdir));
+    free(cwdir);
+    return string;
+}
+
+
+internal uint32_t process_start_time_unix_get(void)
+{
+    Arena_Temp scratch = arena_scratch_begin(NULL,0);
+    uint64_t start_time = 0;
+    pid_t pid = getpid();
+    Str8 path = str8f(scratch.arena, "/proc/%u", pid);
+    struct stat st;
+    int err = stat((char *)path.cstr, &st);
+    if(err == 0)
+    {
+        start_time = st.st_mtime;
+    }
+    arena_scratch_end(scratch);
+    return (uint32_t)start_time;
+}
+
+//- ak: Child Processes
+
+internal Process process_init(Process_Launch_Params *params)
+{
+    Process handle = {0};
+    posix_spawn_file_actions_t file_actions = {0};
+    int file_actions_init_code = posix_spawn_file_actions_init(&file_actions);
+    if(file_actions_init_code == 0)
+    {
+        Arena_Temp scratch = arena_scratch_begin(0, 0);
+        
+        // ak: hange working directory if specified
+        if(params->path.size != 0)
+        {
+            int chdir_code = posix_spawn_file_actions_addchdir_np(&file_actions, (char *)push_cstr(scratch.arena, params->path).cstr);
+            Assert(chdir_code == 0);
+        }
+        
+        // ak: redirect stdout
+        if(params->stdout_file != 0)
+        {
+            int stdout_code = posix_spawn_file_actions_adddup2(&file_actions, (int)params->stdout_file, STDOUT_FILENO);
+            Assert(stdout_code == 0);
+        }
+        
+        // ak: redirect stderr
+        if(params->stderr_file != 0)
+        {
+            int stderr_code = posix_spawn_file_actions_adddup2(&file_actions, (int)params->stderr_file, STDERR_FILENO);
+            Assert(stderr_code == 0);
+        }
+        
+        // ak: redirect stdin
+        if(params->stdin_file != 0)
+        {
+            int stdin_code = posix_spawn_file_actions_adddup2(&file_actions, (int)params->stdin_file, STDIN_FILENO);
+            Assert(stdin_code == 0);
+        }
+        Fs_File std_files[] = { params->stdout_file, params->stderr_file, params->stdin_file };
+        
+        
+        // ak: close original redirected descriptors in child so they don't leak
+        for EachIndex(i, ArrayLength(std_files))
+        {
+            int fd = std_files[i];
+            bool is_unique = (std_files[i] != 0);
+            for EachIndex(j, i)
+            {
+                is_unique &= (std_files[i] != std_files[j]);
+            }
+            if(is_unique && fd > STDERR_FILENO)
+            {
+                int close_code = posix_spawn_file_actions_addclose(&file_actions, fd);
+                Assert(close_code == 0);
+            }
+        }
+        posix_spawnattr_t attr = {0};
+        int attr_init_code = posix_spawnattr_init(&attr);
+        if(attr_init_code == 0)
+        {
+            if(params->new_console || params->process_group.id[0] != 0)
+            {
+                posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETPGROUP);
+                posix_spawnattr_setpgroup(&attr, 0);
+            }
+
+            // ak: package argv
+            char **argv = arena_push(scratch.arena, char *, params->cmd_line.length + 1);
+            {
+                argv[0] = (char *)push_cstr(scratch.arena, params->cmd_line.first->str).cstr;
+                size_t arg_idx = 1;
+                for EachNode(n, Str8_Node, params->cmd_line.first->next)
+                {
+                    argv[arg_idx] = (char *)push_cstr(scratch.arena, n->str).cstr;
+                    arg_idx += 1;
+                }
+            }
+
+            // ak: package envp
+            char **envp = 0;
+            if(params->inherit_env)
+            {
+                envp = _os_linux_state.default_env;
+            }
+            else
+            {
+                envp = arena_push(scratch.arena, char *, params->env.length + 2);
+                size_t env_idx = 0;
+                for EachNode(n, Str8_Node, params->env.first)
+                {
+                    envp[env_idx] = (char *)push_cstr(scratch.arena, n->str).cstr;
+                    env_idx += 1;
+                }
+            }
+
+            // ak: spawn process
+            pid_t pid = 0;
+            int spawn_code = posix_spawnp(&pid, argv[0], &file_actions, &attr, argv, envp);
+            if(spawn_code == 0)
+            {
+                handle.id[0] = (uint64_t)pid;
+                if(params->process_group.id[0] != 0 && !process_group_add(params->process_group, handle))
+                {
+                    kill(pid, SIGKILL);
+                    waitpid(pid, 0, 0);
+                    MemSetZeroStruct(&handle);
+                }
+            }
+
+            // ak: clean up attributes
+            int attr_destroy_code = posix_spawnattr_destroy(&attr);
+        }
+        arena_scratch_end(scratch);
+
+        // ak: clean up file actions
+        int file_actions_destroy_code = posix_spawn_file_actions_destroy(&file_actions);
+    }
+    return handle;
+}
+
+    internal uint64_t
+pid_from_process(Process process)
+{
+    uint32_t result = process.id[0];
+    return result;
+}
+
+    internal bool
+process_poll(Process process, uint64_t *exit_code_out)
+{
+    if(process_match(process, StructZeroType(Process))) { return 0; }
+    siginfo_t info = {0};
+    bool result = waitid(P_PID, (pid_t)process.id[0], &info, WEXITED|WNOHANG|WNOWAIT) == 0 && info.si_pid != 0;
+    if(result && exit_code_out != 0)
+    {
+        *exit_code_out = info.si_code == CLD_EXITED ? (uint64_t)info.si_status : (uint64_t)info.si_status + 128;
+    }
+    return result;
+}
+
+    internal bool
+process_is_active(Process process)
+{
+    bool result = !process_match(process, StructZeroType(Process)) &&
+        !process_poll(process, 0) && kill((pid_t)process.id[0], 0) == 0;
+    return result;
+}
+
+    internal bool
+process_join(Process process, uint64_t endt_us, uint64_t *exit_code_out)
+{
+    bool result = 0;
+
+    pid_t pid = (pid_t)process.id[0];
+    for(;;)
+    {
+        int status = 0;
+        pid_t wait_result = LNX_RETRY_ON_EINTR(waitpid(pid, &status, (endt_us == max_u64) ? 0 : WNOHANG));
+
+        if((wait_result == pid) && (WIFEXITED(status) || WIFSIGNALED(status)))
+        {
+            result = 1;
+            if(exit_code_out != 0)
+            {
+                if     (WIFEXITED(status))   { *exit_code_out = WEXITSTATUS(status); }
+                else if(WIFSIGNALED(status)) { *exit_code_out = WTERMSIG(status) + 128; }
+            }
+            break;
+        }
+
+        if(wait_result == -1) { break; }
+        if(endt_us == 0)      { break; }
+
+        uint64_t now_us = time_now_us();
+        if(now_us >= endt_us) { break; }
+
+        uint64_t left_us  = endt_us - now_us;
+        uint64_t sleep_us = Min(left_us, Thousand(1));
+        usleep((useconds_t)sleep_us);
+    }
+    return result;
+}
+
+internal void process_detach(Process process)
+{
+    Unused(process);
+    // no need to close pid
+}
+
+    internal bool
+process_kill(Process process)
+{
+    int error_code = kill((pid_t)process.id[0], SIGKILL);
+    bool is_killed = error_code == 0;
+    return is_killed;
+}
+
+    internal bool
+process_send_ctrl_c(Process process)
+{
+    bool result = !process_match(process, StructZeroType(Process)) && kill((pid_t)process.id[0], SIGINT) == 0;
+    return result;
+}
+
+typedef struct LNX_Process_Group LNX_Process_Group;
+struct LNX_Process_Group
+{
+    pid_t pid;
+    bool kill_on_close;
+};
+
+internal Process_Group process_group_make(bool kill_on_close)
+{
+    LNX_Process_Group *group = malloc(sizeof(*group));
+    if(group != 0) { *group = (LNX_Process_Group){ .kill_on_close = kill_on_close }; }
+    return (Process_Group){ .id[0] = (uint64_t)group };
+}
+
+internal bool process_group_add(Process_Group group, Process process)
+{
+    LNX_Process_Group *lnx_group = (LNX_Process_Group *)group.id[0];
+    if(lnx_group == 0 || lnx_group->pid != 0 || process_match(process, StructZeroType(Process))) { return 0; }
+    lnx_group->pid = (pid_t)process.id[0];
+    return 1;
+}
+
+internal void process_group_close(Process_Group group)
+{
+    LNX_Process_Group *lnx_group = (LNX_Process_Group *)group.id[0];
+    if(lnx_group != 0)
+    {
+        if(lnx_group->kill_on_close && lnx_group->pid != 0)
+        {
+            kill(-lnx_group->pid, SIGKILL);
+        }
+        free(lnx_group);
+    }
 }
