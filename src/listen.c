@@ -6,7 +6,46 @@
 #include "std/os/os_include.c"
 #include "std/audio/audio.c"
 
-internal void play_draw_ui(Str8 display_name, Audio_Music music, bool is_first_frame)
+internal bool listen_flags_parse(Str8 *path)
+{
+    bool result = true;
+    bool help = false;
+    bool version = false;
+    Str8 description = str8("");
+    Str8 usage = str8("[OPTIONS] <FILE>");
+
+    flags_init();
+    Flags_Option *option = NULL;
+    Flags_Arg *arg = NULL;
+
+    option = flags_option_bool(str8("help"), &help, help, str8("Print help message"));
+    flags_add_option_shortname(option, str8("h"));
+
+    option = flags_option_bool(str8("version"), &help, help, str8("Print version"));
+    flags_add_option_shortname(option, str8("v"));
+
+    arg = flags_arg_str(path, StructZeroType(Str8));
+    flags_make_arg_required(arg);
+
+    Str8_Array *args = term_args_get();
+    if (!flags_parse(args))
+    {
+        flags_print_help(description, usage);
+        flags_print_error();
+        result = false;
+    }
+    else if (help)
+    {
+        flags_print_help(description, usage);
+    }
+    else if (version)
+    {
+        flags_print_version();
+    }
+    return result;
+}
+
+internal void listen_draw_ui(Str8 display_name, Audio_Music music, bool is_first_frame)
 {
     Arena_Temp scratch = arena_scratch_begin(NULL, 0);
     
@@ -76,51 +115,12 @@ internal void play_draw_ui(Str8 display_name, Audio_Music music, bool is_first_f
     arena_scratch_end(scratch);
 }
 
-internal void play_help_message(void)
-{
-    fmt_println(str8("USAGE:"));
-    Str8 *program_name = os_program_path_get();
-    fmt_printfln("   %s [OPTIONS] <FILE>", program_name->cstr);
-    fmt_println(str8("OPTIONS:"));
-    flags_print_help();
-    fmt_println(str8("OPTIONS:"));
-    fmt_printfln("   %s", BUILD_VERSION);
-}
-
-internal int32_t base_main(void)
+internal uint64_t base_main(void)
 {
     log_trace_level_set(log_trace_g, Log_Level_Warn);
     Str8 path = STRUCT_ZERO;
-    bool help = false;
     
-    // ak: parse flags
-    {
-        flags_init();
-        Flags_Option *option = NULL;
-        Flags_Arg *arg = NULL;
-        
-        option = flags_option_bool(str8("help"), &help, help, str8("Print help message"));
-        flags_add_option_shortname(option, str8("h"));
-        
-        arg = flags_arg_str(&path, StructZeroType(Str8));
-        flags_make_arg_required(arg);
-        
-        Str8_Array *args = term_args_get();
-        bool parsed = flags_parse(args);
-        
-        if (!parsed)
-        {
-            play_help_message();
-            flags_print_error();
-            return 1;
-        }
-    }
-    
-    if (help)
-    {
-        play_help_message();
-        return 0;
-    }
+    if (!listen_flags_parse(&path)) return 1;
     
     if (!fs_file_path_exists(path))
     {
@@ -151,7 +151,7 @@ internal int32_t base_main(void)
     while (audio_music_is_playing(music))
     {
         audio_music_update(music);
-        play_draw_ui(file_name, music, is_first_frame);
+        listen_draw_ui(file_name, music, is_first_frame);
         is_first_frame = false;
         os_sleep_ms(50);
     }
