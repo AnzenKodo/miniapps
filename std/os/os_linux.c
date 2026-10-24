@@ -535,59 +535,45 @@ internal uint32_t process_start_time_unix_get(void)
 
 internal Process process_init(Process_Launch_Params *params)
 {
-    Process handle = {0};
-    posix_spawn_file_actions_t file_actions = {0};
+    Process process = STRUCT_ZERO;
+    posix_spawn_file_actions_t file_actions = STRUCT_ZERO;
     int file_actions_init_code = posix_spawn_file_actions_init(&file_actions);
     if(file_actions_init_code == 0)
     {
-        Arena_Temp scratch = arena_scratch_begin(0, 0);
-        
-        // ak: hange working directory if specified
+        Arena_Temp scratch = arena_scratch_begin(NULL, 0);
         if(params->path.size != 0)
         {
-            int chdir_code = posix_spawn_file_actions_addchdir_np(&file_actions, (char *)push_cstr(scratch.arena, params->path).cstr);
+            int chdir_code = posix_spawn_file_actions_addchdir_np(&file_actions, (char *)cstr_push(params->path, scratch.arena).cstr);
             Assert(chdir_code == 0);
         }
-        
-        // ak: redirect stdout
         if(params->stdout_file != 0)
         {
             int stdout_code = posix_spawn_file_actions_adddup2(&file_actions, (int)params->stdout_file, STDOUT_FILENO);
             Assert(stdout_code == 0);
         }
-        
-        // ak: redirect stderr
         if(params->stderr_file != 0)
         {
             int stderr_code = posix_spawn_file_actions_adddup2(&file_actions, (int)params->stderr_file, STDERR_FILENO);
             Assert(stderr_code == 0);
         }
-        
-        // ak: redirect stdin
         if(params->stdin_file != 0)
         {
             int stdin_code = posix_spawn_file_actions_adddup2(&file_actions, (int)params->stdin_file, STDIN_FILENO);
             Assert(stdin_code == 0);
         }
         Fs_File std_files[] = { params->stdout_file, params->stderr_file, params->stdin_file };
-        
-        
-        // ak: close original redirected descriptors in child so they don't leak
         for EachIndex(i, ArrayLength(std_files))
         {
             int fd = std_files[i];
             bool is_unique = (std_files[i] != 0);
-            for EachIndex(j, i)
-            {
-                is_unique &= (std_files[i] != std_files[j]);
-            }
+            for EachIndex(j, i) { is_unique &= (std_files[i] != 0); }
             if(is_unique && fd > STDERR_FILENO)
             {
                 int close_code = posix_spawn_file_actions_addclose(&file_actions, fd);
                 Assert(close_code == 0);
             }
         }
-        posix_spawnattr_t attr = {0};
+        posix_spawnattr_t attr = STRUCT_ZERO;
         int attr_init_code = posix_spawnattr_init(&attr);
         if(attr_init_code == 0)
         {
@@ -597,19 +583,19 @@ internal Process process_init(Process_Launch_Params *params)
                 posix_spawnattr_setpgroup(&attr, 0);
             }
 
-            // ak: package argv
+            // package argv
             char **argv = arena_push(scratch.arena, char *, params->cmd_line.length + 1);
             {
-                argv[0] = (char *)push_cstr(scratch.arena, params->cmd_line.first->str).cstr;
+                argv[0] = (char *)cstr_push(params->cmd_line.first->str, scratch.arena).cstr;
                 size_t arg_idx = 1;
                 for EachNode(n, Str8_Node, params->cmd_line.first->next)
                 {
-                    argv[arg_idx] = (char *)push_cstr(scratch.arena, n->str).cstr;
+                    argv[arg_idx] = (char *)cstr_push(n->str, scratch.arena).cstr;
                     arg_idx += 1;
                 }
             }
 
-            // ak: package envp
+            // package envp
             char **envp = 0;
             if(params->inherit_env)
             {
@@ -619,36 +605,36 @@ internal Process process_init(Process_Launch_Params *params)
             {
                 envp = arena_push(scratch.arena, char *, params->env.length + 2);
                 size_t env_idx = 0;
-                for EachNode(n, Str8_Node, params->env.first)
+                for EachNode(n, Str8_Node, params->cmd_line.first)
                 {
-                    envp[env_idx] = (char *)push_cstr(scratch.arena, n->str).cstr;
+                    envp[env_idx] = (char *)n->str.cstr;
                     env_idx += 1;
                 }
             }
 
-            // ak: spawn process
+            // spawn process
             pid_t pid = 0;
             int spawn_code = posix_spawnp(&pid, argv[0], &file_actions, &attr, argv, envp);
             if(spawn_code == 0)
             {
-                handle.id[0] = (uint64_t)pid;
-                if(params->process_group.id[0] != 0 && !process_group_add(params->process_group, handle))
+                process.id[0] = (uint64_t)pid;
+                if(params->process_group.id[0] != 0 && !process_group_add(params->process_group, process))
                 {
                     kill(pid, SIGKILL);
                     waitpid(pid, 0, 0);
-                    MemSetZeroStruct(&handle);
+                    MemSetZeroStruct(&process);
                 }
             }
 
-            // ak: clean up attributes
+            // clean up attributes
             int attr_destroy_code = posix_spawnattr_destroy(&attr);
         }
         arena_scratch_end(scratch);
 
-        // ak: clean up file actions
+        // clean up file actions
         int file_actions_destroy_code = posix_spawn_file_actions_destroy(&file_actions);
     }
-    return handle;
+    return process;
 }
 
     internal uint64_t
@@ -662,7 +648,7 @@ pid_from_process(Process process)
 process_poll(Process process, uint64_t *exit_code_out)
 {
     if(process_match(process, StructZeroType(Process))) { return 0; }
-    siginfo_t info = {0};
+    siginfo_t info = STRUCT_ZERO;
     bool result = waitid(P_PID, (pid_t)process.id[0], &info, WEXITED|WNOHANG|WNOWAIT) == 0 && info.si_pid != 0;
     if(result && exit_code_out != 0)
     {

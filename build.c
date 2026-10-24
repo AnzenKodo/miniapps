@@ -88,6 +88,9 @@ internal uint64_t build_run_list(Str8_List cmd_list);
 internal uint64_t build_run_string(Str8 cmd);
 internal Str8 build_path(Build_Info *info);
 internal Str8 build_program_version_get(Build_Type type, Arena *arena);
+internal void build_log_tracef(Log_Level level, const char *format, ...);
+
+#define BuildLog(level, format, ...) build_log_tracef(Log_Level_##level, (format), ##__VA_ARGS__)
 
 // ak: Compilers functions ====================================================
 
@@ -213,7 +216,7 @@ internal void build_compile(Build_Info *info)
     }
     else
     {
-        fmt_eprintf("Error: OS build compile is not supported.");
+        BuildLog(Error, "OS build compile is not supported.");
     }
 }
 
@@ -417,7 +420,7 @@ internal uint64_t base_main(void)
         else
         {
             fmt_printf("%s", help_message);
-            fmt_eprintfln("Error: wrong option provided `%s8`.", arg1);
+            BuildLog(Error, "wrong option provided `%s8`.", arg1);
             exit_code = 1;
         }
     }
@@ -444,7 +447,7 @@ internal uint64_t base_main(void)
     {
         if (str8_match(info.name, str8("all"), 0))
         {
-            fmt_eprintf("Error: Please specify a single program name.");
+            BuildLog(Error, "please specify a single program name.");
         }
         else
         {
@@ -458,7 +461,7 @@ internal uint64_t base_main(void)
         // ak: create build directory if not exists
         if (fs_dir_make(str8(BUILD_DIR)))
         {
-            fmt_printf("Created '"BUILD_DIR"' directory.\n");
+            BuildLog(Info, "created '"BUILD_DIR"' directory.\n");
         }
         
         // ak: build miniaudio lib
@@ -512,7 +515,7 @@ internal uint64_t base_main(void)
             if (str8_match(name, str8("all"), 0) && run_program)
             {
                 fmt_printf("%s", help_message);
-                fmt_eprintf("Error: Please specify a single program name.");
+                BuildLog(Error, "please specify a single program name.");
                 exit_code = 1;
             }
             else if (exit_code == 0 && run_program)
@@ -532,11 +535,11 @@ internal uint64_t build_run_list(Str8_List cmd_list)
     uint64_t exit_code = 0;
     Arena_Temp scratch = arena_scratch_begin(NULL, 0);
     
-    fmt_printf("Command: %s8\n", str8_list_join(scratch.arena, &cmd_list, 0));
+    fmt_printf("COMMAND: %s8\n", str8_list_join(scratch.arena, &cmd_list, 0));
     Process process = process_launch_from_cmd_list(cmd_list);
     if (process_is_zero(process))
     {
-        fmt_eprintfln("\nError: failed to launch process.");
+        BuildLog(Error, "failed to launch process.");
         exit_code = 1;
     }
     else
@@ -544,7 +547,7 @@ internal uint64_t build_run_list(Str8_List cmd_list)
         bool joined = process_join(process, max_u64, &exit_code);
         if (!joined)
         {
-            fmt_eprintfln("\nError: failed waiting for process to finish.");
+            BuildLog(Error, "failed waiting for process to finish.");
         }
     }
     
@@ -557,11 +560,11 @@ internal uint64_t build_run_string(Str8 cmd)
     uint64_t exit_code = 0;
     Arena_Temp scratch = arena_scratch_begin(NULL, 0);
     
-    fmt_printf("Command: %s8\n", cmd);
+    fmt_printf("COMMAND: %s8\n", cmd);
     Process process = process_launch_from_cmd(cmd);
     if (process_is_zero(process))
     {
-        fmt_eprintfln("\nError: failed to launch process.");
+        BuildLog(Error, "failed to launch process.");
         exit_code = 1;
     }
     else
@@ -569,7 +572,7 @@ internal uint64_t build_run_string(Str8 cmd)
         bool joined = process_join(process, max_u64, &exit_code);
         if (!joined)
         {
-            fmt_eprintfln("\nError: failed waiting for process to finish.");
+            BuildLog(Error, "failed waiting for process to finish.");
         }
     }
     
@@ -628,13 +631,13 @@ internal Str8 build_path(Build_Info *info)
     return result;
 }
 
-internal Str8 build_capture_cmd(Str8 cmd, Arena *arena, bool *success_out)
+internal Str8 build_git_run_cmd(Str8 cmd, Arena *arena, bool *success_out)
 {
     Str8 result = STRUCT_ZERO;
     Arena_Temp scratch = arena_scratch_begin(&arena, 1);
     
     fs_dir_make(str8(BUILD_DIR));
-    Str8 out_path = str8f(scratch.arena, BUILD_DIR "/.git_tmp.txt");
+    Str8 out_path = str8(BUILD_DIR "/.git_tmp.txt");
     Str8 dev_null = (Context_Os_CURRENT == Context_Os_Windows) ? str8("NUL") : str8("/dev/null");
     
     Str8 full_cmd = str8f(scratch.arena, "%s8 > %s8 2> %s8", cmd, out_path, dev_null);
@@ -652,7 +655,8 @@ internal Str8 build_capture_cmd(Str8 cmd, Arena *arena, bool *success_out)
         }
     }
     
-    unlink((char *)push_cstr(scratch.arena, out_path).cstr);
+    Fs_File f = fs_file_open(out_path, Fs_File_Access_Flag_Write);
+    fs_file_close(f);
     
     if (success_out != 0)
     {
@@ -665,8 +669,6 @@ internal Str8 build_capture_cmd(Str8 cmd, Arena *arena, bool *success_out)
 
 internal Str8 build_program_version_get(Build_Type type, Arena *arena)
 {
-    Arena_Temp scratch = arena_scratch_begin(&arena, 1);
-    
     Str8 type_str = STRUCT_ZERO;
     switch (type)
     {
@@ -681,77 +683,82 @@ internal Str8 build_program_version_get(Build_Type type, Arena *arena)
         case Build_Type_Release: {} break;
     }
     
-    // ak: attempt to get commit id and datetime from git
-    bool git_ok = false;
-    Str8 git_info = build_capture_cmd(str8("git log -1 --date=format:\"%b %d %Y %H.%M.%S\" --format=\"%h%n%cd\""), scratch.arena, &git_ok);
+    Arena_Temp scratch = arena_scratch_begin(&arena, 1);
     
     Str8 commit_id = STRUCT_ZERO;
-    Str8 date_str = STRUCT_ZERO;
+    Str8 version_date = STRUCT_ZERO;
     
-    if (git_ok && git_info.length != 0)
+    bool git_installed = false;
+    build_git_run_cmd(str8("git --version"), scratch.arena, &git_installed);
+    
+    if (!git_installed)
     {
-        uint8_t split_chars[] = {'\n', '\r'};
-        Str8_List lines = str8_split(scratch.arena, git_info, split_chars, ArrayLength(split_chars), 0);
-        if (lines.length >= 1)
-        {
-            commit_id = str8_skip_chop_whitespace(lines.first->str);
-        }
-        if (lines.length >= 2)
-        {
-            date_str = str8_skip_chop_whitespace(lines.first->next->str);
-        }
+        BuildLog(Warn, "git is not installed, using compile version date time instead.\n");
+        version_date = str8(BUILD_VERSION);
     }
-    
-    // ak: fallback if git is not installed or not in a git repo
-    if (commit_id.length == 0 || date_str.length == 0)
+    else
     {
-        fmt_eprintfln("Warning: git is not installed. using compiled date time as the version.");
-        git_ok = false;
-        commit_id = StructZeroType(Str8);
-        date_str = str8(BUILD_VERSION);
-    }
-    
-    // ak: if release build, warn if changes have not been committed to git
-    if (type == Build_Type_Release && git_ok)
-    {
-        local_persist bool warned_uncommitted = false;
-        if (!warned_uncommitted)
+        if (type == Build_Type_Release)
         {
             bool status_ok = false;
-            Str8 git_status = build_capture_cmd(str8("git status --porcelain"), scratch.arena, &status_ok);
-            if (status_ok && git_status.length != 0)
+            Str8 status_out = build_git_run_cmd(str8("git status --porcelain"), scratch.arena, &status_ok);
+            if (status_ok && status_out.length > 0)
             {
-                fmt_eprintfln("Warning: changes have not been committed to git.");
-                warned_uncommitted = true;
+                BuildLog(Warn, "changes have not been committed to git.\n");
             }
+        }
+        
+        bool commit_ok = false;
+        commit_id = build_git_run_cmd(str8("git log -1 --format=%h"), arena, &commit_ok);
+        
+        bool date_ok = false;
+        version_date = build_git_run_cmd(str8("git log -1 --date=format:\"%b %d %Y %H.%M.%S\" --format=%cd"), arena, &date_ok);
+        if (!date_ok || version_date.length == 0)
+        {
+            version_date = str8(BUILD_VERSION);
         }
     }
     
-    // ak: format version string
     Str8 result = STRUCT_ZERO;
-    if (commit_id.length != 0)
+    if (commit_id.length > 0)
     {
-        if (type_str.length != 0)
+        if (type_str.length > 0)
         {
-            result = str8f(arena, "%s8 %s8 (%s8)", type_str, date_str, commit_id);
+            result = str8f(arena, "%s8 %s8 (%s8)", type_str, version_date, commit_id);
         }
         else
         {
-            result = str8f(arena, "%s8 (%s8)", date_str, commit_id);
+            result = str8f(arena, "%s8 (%s8)", version_date, commit_id);
         }
     }
     else
     {
-        if (type_str.length != 0)
+        if (type_str.length > 0)
         {
-            result = str8f(arena, "%s8 %s8", type_str, date_str);
+            result = str8f(arena, "%s8 %s8", type_str, version_date);
         }
         else
         {
-            result = str8f(arena, "%s8", date_str);
+            result = str8f(arena, "%s8", version_date);
         }
     }
     
     arena_scratch_end(scratch);
     return result;
+}
+
+internal void build_log_tracef(Log_Level level, const char *format, ...)
+{
+    Arena_Temp scratch = arena_scratch_begin(NULL, 0);
+    va_list args;
+    va_start(args, format);
+    {
+        Str8 level_string = log_level_string_get(level);
+        Fs_File file = std_type_from_log_level(level);
+        Str8 string = str8fv(scratch.arena, format, args);
+        fmt_fprintf(file, "%-*s ", str8_varg(level_string));
+        fmt_fprintln(file, string);
+    }
+    va_end(args);
+    arena_scratch_end(scratch);
 }

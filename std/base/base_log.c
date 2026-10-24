@@ -27,6 +27,7 @@ internal Str8 log_level_string_get(Log_Level level)
         } break;
         case Log_Level_COUNT: {} break;
     }
+    level_string.length = 7;
     return level_string;
 }
 
@@ -92,7 +93,7 @@ internal void log_trace(Log *log, Log_Level level, const char *file_name, size_t
     {
         Fs_File file = std_type_from_log_level(level);
         Str8 level_string = log_level_string_get(level);
-        fmt_fprintf(file, "%-7s8 ", level_string);
+        fmt_fprintf(file, "%-*s ", str8_varg(level_string));
         if (level >= Log_Level_Warn)
         {
             fmt_fprintf(file, "%s:%zu ", file_name, line_number);

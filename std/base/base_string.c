@@ -862,6 +862,16 @@ internal Str8 str8f(Arena *arena, const char *format, ...)
     return result;
 }
 
+internal Str8 cstr_push(Str8 str, Arena *arena)
+{
+    size_t buffer_size = str.length + 1;
+    uint8_t *buffer = arena_push_nz(arena, uint8_t, buffer_size);
+    mem_copy(buffer, str.cstr, str.length);
+    buffer[str.length] = 0;
+    Str8 result = str8_init(buffer, buffer_size);
+    return result;
+}
+
 // ak: UTF-8 & UTF-16 Decoding/Encoding
 //=============================================================================
 
