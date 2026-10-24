@@ -6,17 +6,17 @@ target:
 {
   executable: "build/play_debug"
   working_directory: "../Miniapps"
-  enabled: 1
   arguments: "assets/sound.mp3"
-}
-target:
-{
-  executable: "build/play_debug"
-  arguments: "README.md"
-  working_directory: "../Miniapps"
 }
 watch_pin:
 {
   expression: message
   source_location: "std/audio/audio.c:138:1"
+}
+target:
+{
+  executable: "a.out"
+  working_directory: ""
+  arguments: "build-run"
+  enabled: 1
 }

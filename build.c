@@ -19,6 +19,7 @@
 //=============================================================================
 
 #define BUILD_DIR     "build"
+#define BUILD_SRC_DIR "src"
 
 // ak: Types
 //=============================================================================
@@ -55,25 +56,38 @@ struct Build_Info
 // ak: Globals
 //=============================================================================
 
-global const char *help_message = "DESCRIPTION:\n"
-"   build.c - C file that build's C projects.\n"
+global const char *help_message =
+"DESCRIPTION:\n"
+"   Build driver for compiling and running C projects.\n\n"
 "USAGE:\n"
-"   build.c [OPTIONS]\n"
-"OPTIONS:\n"
-"   build                Build project\n"
-"   run                  Run project\n"
-"   build-run            Build and Run project\n"
-"   build-dry            Build without producing any output files\n"
-"   build-debugger       Build for Debugger\n"
-"   gen-meta             Generate code from Metaprogram\n"
-"   --help -h            Print help\n";
+"   build [COMMAND] [TARGET] [CONFIG]\n\n"
+"COMMANDS:\n"
+"   build                Compile target program(s) (default)\n"
+"   run                  Run target program (builds first if not present)\n"
+"   build-run            Compile and run target program\n"
+"   build-dry            Check syntax without producing output files\n"
+"   build-debugger       Compile with full debug information (-ggdb -g3)\n"
+"   gen-meta             Generate code using MetaDesk metaprogram\n"
+"   help, -h, --help     Print this help message\n\n"
+"ARGUMENTS:\n"
+"   [TARGET]             Name of program in src/<name>.c (e.g. 'listen').\n"
+"                        Defaults to 'all' (builds every program in src/).\n"
+"   [CONFIG]             Build configuration: 'dev' (default) or 'release'.\n\n"
+"EXAMPLES:\n"
+"   ./build build                    Build all programs (dev)\n"
+"   ./build build listen             Build 'listen' program (dev)\n"
+"   ./build build listen release     Build 'listen' program (optimized release)\n"
+"   ./build run listen               Run 'listen' program\n"
+"   ./build build-run listen         Build and run 'listen'\n"
+"   ./build build-debugger listen    Build 'listen' for debugger\n";
 
 // ak: Functions
 //=============================================================================
 
-internal int32_t build_run(Str8 cmd);
+internal uint64_t build_run_list(Str8_List cmd_list);
+internal uint64_t build_run_string(Str8 cmd);
 internal Str8 build_path(Build_Info *info);
-internal Str8 build_program_version_get();
+internal Str8 build_program_version_get(Build_Type type, Arena *arena);
 
 // ak: Compilers functions ====================================================
 
@@ -85,7 +99,7 @@ internal void build_compile_gcc_style_flags(Build_Info *info)
     {
         str8_list_pushf(info->arena, &info->cmd, " -x c");
     }
-    str8_list_pushf(info->arena, &info->cmd, " %s", info->entry_point.cstr);
+    str8_list_pushf(info->arena, &info->cmd, " %s8", info->entry_point);
     // ak: dry run
     if (info->flags & Build_Flag_DryRun)
     {
@@ -154,7 +168,7 @@ internal void build_compile_gcc_style_flags(Build_Info *info)
         str8_list_pushf(info->arena, &info->cmd, " -c");
     }
     // ak: add version
-    str8_list_pushf(info->arena, &info->cmd, " -DBUILD_VERSION='\"%s8\"'", build_program_version_get());
+    str8_list_pushf(info->arena, &info->cmd, " -DBUILD_VERSION='\"%s8\"'", build_program_version_get(info->type, info->arena));
 }
 
 internal void build_compile_gcc(Build_Info *info)
@@ -205,7 +219,7 @@ internal void build_compile(Build_Info *info)
 
 // ak: Build run functions ====================================================
 
-internal int32_t build_run_program(Build_Info *info)
+internal uint64_t build_run_program(Build_Info *info)
 {
     fmt_println(str8("# Running ------------------------------------------------------------------- #"));
     Str8_List list = STRUCT_ZERO;
@@ -213,21 +227,16 @@ internal int32_t build_run_program(Build_Info *info)
     {
         str8_list_pushf(info->arena, &list, "WINEARCH=win64 wine ");
     }
-    if (Context_Os_CURRENT == Context_Os_Windows)
-    {
-        str8_list_pushf(info->arena, &list, "setup_x64.bat & ");
-    }
     str8_list_push(info->arena, &list, build_path(info));
     str8_list_pushf(info->arena, &list, " %.*s", str8_varg(info->args));
-    Str8 cmd = str8_list_join(info->arena, &list, NULL);
-    return build_run(cmd);
+    return build_run_list(list);
 }
 
 // ak: Program Specific Compile Functions ======================================
 
-internal int32_t build_compile_miniaudio(Build_Info *info)
+internal uint64_t build_compile_miniaudio(Build_Info *info)
 {
-    int32_t result = 0;
+    uint64_t result = 0;
     
     // ak: create build
     Str8 path = build_path(info);
@@ -251,19 +260,18 @@ internal int32_t build_compile_miniaudio(Build_Info *info)
         {
             str8_list_pushf(info->arena, &info->cmd, " -Wno-stringop-overflow");
         }
-        Str8 cmd = str8_list_join(info->arena, &info->cmd, NULL);
-        result = build_run(cmd);
+        result = build_run_list(info->cmd);
         if ((result == 0) && (info->flags & Build_Flag_Static_Lib))
         {
-            result = build_run(str8("ar rcs build/libminiaudio.a build/libminiaudio_for_static.so"));
+            result = build_run_string(str8("ar rcs build/libminiaudio.a build/libminiaudio_for_static.so"));
         }
     }
     return result;
 }
 
-internal int32_t build_compile_run_metadesk(void)
+internal uint64_t build_compile_run_metadesk(void)
 {
-    int32_t result = 0;
+    uint64_t result = 0;
     Arena_Temp scratch = arena_scratch_begin(NULL, 0);
     
     Build_Info info = STRUCT_ZERO;
@@ -275,8 +283,7 @@ internal int32_t build_compile_run_metadesk(void)
     
     fmt_println(str8("# Compiling MetaDesk ------------------------------------------------------- #"));
     build_compile(&info);
-    Str8 cmd = str8_list_join(info.arena, &info.cmd, NULL);
-    result = build_run(cmd);
+    result = build_run_list(info.cmd);
     if (result == 0)
     {
         result = build_run_program(&info);
@@ -286,53 +293,54 @@ internal int32_t build_compile_run_metadesk(void)
     return result;
 }
 
-internal int32_t build_compile_program(Build_Info *info, Build_Info *ma_info)
+internal uint64_t build_compile_program(Build_Info *info, Build_Info *ma_info)
 {
+    Arena_Temp scratch = arena_scratch_begin(NULL, 0);
     fmt_println(str8("# Compiling Program --------------------------------------------------------- #"));
-    int32_t result = 0;
-    info->entry_point = str8f(info->arena, "src/%s8.c", info->name);
+    uint64_t result = 0;
+    info->entry_point = str8f(scratch.arena, "src/%s8.c", info->name);
+    info->arena = scratch.arena;
     build_compile(info);
     if (!(info->flags & Build_Flag_DryRun))
     {
         // ak: libs
         if ((info->flags & Build_Flag_MingW) || Context_Os_CURRENT == Context_Os_Windows)
         {
-            str8_list_pushf(info->arena, &info->cmd, " -lopengl32 -luser32 -lgdi32");
+            str8_list_pushf(scratch.arena, &info->cmd, " -lopengl32 -luser32 -lgdi32");
         }
         else
         {
-            str8_list_pushf(info->arena, &info->cmd, " -lm -lpthread");
-            str8_list_pushf(info->arena, &info->cmd, " -lxcb -lxcb-image -lxcb-sync -lxcb-keysyms -lxcb-cursor");
-            str8_list_pushf(info->arena, &info->cmd, " -lEGL -lGL");
+            str8_list_pushf(scratch.arena, &info->cmd, " -lm -lpthread");
+            str8_list_pushf(scratch.arena, &info->cmd, " -lxcb -lxcb-image -lxcb-sync -lxcb-keysyms -lxcb-cursor");
+            str8_list_pushf(scratch.arena, &info->cmd, " -lEGL -lGL");
             if (info->type == Build_Type_Release)
             {
-                str8_list_pushf(info->arena, &info->cmd, " build/libminiaudio.a");
+                str8_list_pushf(scratch.arena, &info->cmd, " build/libminiaudio.a");
             }
             else
             {
-                str8_list_pushf(info->arena, &info->cmd, " %s8", build_path(ma_info));
+                str8_list_pushf(scratch.arena, &info->cmd, " %s8", build_path(ma_info));
             }
         }
     }
-    Str8 cmd = str8_list_join(info->arena, &info->cmd, NULL);
-    result = build_run(cmd);
+    result = build_run_list(info->cmd);
+    arena_scratch_end(scratch);
     return result;
 }
 
 // ak: Build Entry Point ======================================================
 
-internal int32_t base_main(void)
+internal uint64_t base_main(void)
 {
     Arena *arena = arena_alloc();
     
     Build_Info info = STRUCT_ZERO;
-    info.arena = arena;
     
     bool should_print_help = false;
     bool run_program = false;
     bool only_run_program = false;
     bool gen_meta_program = false;
-    int32_t exit_code = 0;
+    uint64_t exit_code = 0;
     Str8 app_name = STRUCT_ZERO;
     
     Str8_Array *args = term_args_get();
@@ -341,15 +349,20 @@ internal int32_t base_main(void)
         Str8 arg1 = args->v[1];
         Str8 arg2 = STRUCT_ZERO;
         Str8 arg3 = STRUCT_ZERO;
+        
         if (args->length >= 3)
-        {
-            info.name = args->v[2];
-        }
+        { info.name = args->v[2]; }
+        else
+        { info.name = str8("all"); }
+        
         if (args->length >= 4)
         {
             arg3 = args->v[3];
         }
-        if (str8_match(arg1, str8("--help"), 0) || str8_match(arg1, str8("-h"), 0))
+        if (
+            str8_match(arg1, str8("help"), 0) ||
+            str8_match(arg1, str8("--help"), 0) ||
+            str8_match(arg1, str8("-h"), 0))
         {
             should_print_help = true;
         }
@@ -391,7 +404,6 @@ internal int32_t base_main(void)
         }
         else if (str8_match(arg1, str8("run"), 0))
         {
-            info.name = arg2;
             if (str8_match(arg3, str8("release"), 0))
             {
                 info.type = Build_Type_Release;
@@ -404,16 +416,16 @@ internal int32_t base_main(void)
         }
         else
         {
-            fmt_eprintf("Error: wrong option provided `%s`.\n\n", arg1.cstr);
-            should_print_help = true;
-            return 1;
+            fmt_printf("%s", help_message);
+            fmt_eprintfln("Error: wrong option provided `%s8`.", arg1);
+            exit_code = 1;
         }
     }
     else
     {
         should_print_help = true;
     }
-    if (str8_match(args->v[2], str8("mingw"), 0))
+    if (args->length >= 3 && str8_match(args->v[2], str8("mingw"), 0))
     {
         info.flags |= Build_Flag_MingW;
     }
@@ -430,9 +442,16 @@ internal int32_t base_main(void)
     }
     else if (only_run_program)
     {
-        build_run(build_path(&info));
+        if (str8_match(info.name, str8("all"), 0))
+        {
+            fmt_eprintf("Error: Please specify a single program name.");
+        }
+        else
+        {
+            exit_code = build_run_string(build_path(&info));
+        }
     }
-    else
+    else if (exit_code == 0)
     {
         fmt_println(str8("# Build Output ============================================================== #"));
         
@@ -450,7 +469,8 @@ internal int32_t base_main(void)
         ma_info.flags = info.type == Build_Type_Release ? Build_Flag_Static_Lib : Build_Flag_Dynamic_Lib;
         ma_info.arena = arena;
         exit_code = build_compile_miniaudio(&ma_info);
-        if (exit_code == 0) {
+        if (exit_code == 0)
+        {
             exit_code = build_compile_miniaudio(&ma_info);
         }
         
@@ -463,8 +483,39 @@ internal int32_t base_main(void)
         // ak: build program
         else if (exit_code == 0)
         {
-            exit_code = build_compile_program(&info, &ma_info);
-            if (exit_code == 0 && run_program)
+            Str8 name = info.name;
+            if (str8_match(name, str8("all"), 0))
+            {
+                Fs_Walk *walk = fs_walk_begin(arena, str8(BUILD_SRC_DIR), 0);
+                for (Fs_Info fs_info = STRUCT_ZERO; fs_walk_next(arena, walk, &fs_info);)
+                {
+                    if (fs_info.props.flags & Fs_Property_Flag_IsFolder)
+                    {
+                        continue;
+                    }
+                    else
+                    {
+                        info.name = str8_chop_last_dot(fs_info.name);
+                        exit_code = build_compile_program(&info, &ma_info);
+                        if (exit_code != 0)
+                        {
+                            break;
+                        }
+                    }
+                }
+                fs_walk_end(walk);
+            }
+            else
+            {
+                exit_code = build_compile_program(&info, &ma_info);
+            }
+            if (str8_match(name, str8("all"), 0) && run_program)
+            {
+                fmt_printf("%s", help_message);
+                fmt_eprintf("Error: Please specify a single program name.");
+                exit_code = 1;
+            }
+            else if (exit_code == 0 && run_program)
             {
                 exit_code = build_run_program(&info);
             }
@@ -476,15 +527,53 @@ internal int32_t base_main(void)
 
 // ak: Build functions ========================================================
 
-internal int32_t build_run(Str8 cmd)
+internal uint64_t build_run_list(Str8_List cmd_list)
 {
-    fmt_printf("Command: %s8\n", cmd);
-    int32_t status = system((const char *)cmd.cstr);
-    if (status == -1)
+    uint64_t exit_code = 0;
+    Arena_Temp scratch = arena_scratch_begin(NULL, 0);
+    
+    fmt_printf("Command: %s8\n", str8_list_join(scratch.arena, &cmd_list, 0));
+    Process process = process_launch_from_cmd_list(cmd_list);
+    if (process_is_zero(process))
     {
-        fmt_eprintf("\nError: %s\n", strerror(errno));
+        fmt_eprintfln("\nError: failed to launch process.");
+        exit_code = 1;
     }
-    int32_t exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : 1;
+    else
+    {
+        bool joined = process_join(process, max_u64, &exit_code);
+        if (!joined)
+        {
+            fmt_eprintfln("\nError: failed waiting for process to finish.");
+        }
+    }
+    
+    arena_scratch_end(scratch);
+    return exit_code;
+}
+
+internal uint64_t build_run_string(Str8 cmd)
+{
+    uint64_t exit_code = 0;
+    Arena_Temp scratch = arena_scratch_begin(NULL, 0);
+    
+    fmt_printf("Command: %s8\n", cmd);
+    Process process = process_launch_from_cmd(cmd);
+    if (process_is_zero(process))
+    {
+        fmt_eprintfln("\nError: failed to launch process.");
+        exit_code = 1;
+    }
+    else
+    {
+        bool joined = process_join(process, max_u64, &exit_code);
+        if (!joined)
+        {
+            fmt_eprintfln("\nError: failed waiting for process to finish.");
+        }
+    }
+    
+    arena_scratch_end(scratch);
     return exit_code;
 }
 
@@ -493,11 +582,11 @@ internal Str8 build_path(Build_Info *info)
     Str8_List list = STRUCT_ZERO;
     if (Context_Os_CURRENT == Context_Os_Windows)
     {
-        str8_list_pushf(info->arena, &list, BUILD_DIR"\\%s", info->name.cstr);
+        str8_list_pushf(info->arena, &list, BUILD_DIR"\\%s8", info->name);
     }
     else
     {
-        str8_list_pushf(info->arena, &list, BUILD_DIR"/%s", info->name.cstr);
+        str8_list_pushf(info->arena, &list, BUILD_DIR"/%s8", info->name);
     }
     
     switch (info->type)
@@ -539,7 +628,130 @@ internal Str8 build_path(Build_Info *info)
     return result;
 }
 
-internal Str8 build_program_version_get()
+internal Str8 build_capture_cmd(Str8 cmd, Arena *arena, bool *success_out)
 {
-    return str8(BUILD_VERSION);
+    Str8 result = STRUCT_ZERO;
+    Arena_Temp scratch = arena_scratch_begin(&arena, 1);
+    
+    fs_dir_make(str8(BUILD_DIR));
+    Str8 out_path = str8f(scratch.arena, BUILD_DIR "/.git_tmp.txt");
+    Str8 dev_null = (Context_Os_CURRENT == Context_Os_Windows) ? str8("NUL") : str8("/dev/null");
+    
+    Str8 full_cmd = str8f(scratch.arena, "%s8 > %s8 2> %s8", cmd, out_path, dev_null);
+    Process process = process_launch_from_cmd(full_cmd);
+    
+    bool ok = false;
+    if (!process_is_zero(process))
+    {
+        uint64_t exit_code = 1;
+        if (process_join(process, max_u64, &exit_code) && exit_code == 0)
+        {
+            ok = true;
+            U8Array content = fs_file_path_read_full(out_path, arena);
+            result = str8_skip_chop_whitespace(str8_from_u8array(content));
+        }
+    }
+    
+    unlink((char *)push_cstr(scratch.arena, out_path).cstr);
+    
+    if (success_out != 0)
+    {
+        *success_out = ok;
+    }
+    
+    arena_scratch_end(scratch);
+    return result;
+}
+
+internal Str8 build_program_version_get(Build_Type type, Arena *arena)
+{
+    Arena_Temp scratch = arena_scratch_begin(&arena, 1);
+    
+    Str8 type_str = STRUCT_ZERO;
+    switch (type)
+    {
+        case Build_Type_Dev:
+        {
+            type_str = str8("Dev");
+        } break;
+        case Build_Type_Debug:
+        {
+            type_str = str8("Debug");
+        } break;
+        case Build_Type_Release: {} break;
+    }
+    
+    // ak: attempt to get commit id and datetime from git
+    bool git_ok = false;
+    Str8 git_info = build_capture_cmd(str8("git log -1 --date=format:\"%b %d %Y %H.%M.%S\" --format=\"%h%n%cd\""), scratch.arena, &git_ok);
+    
+    Str8 commit_id = STRUCT_ZERO;
+    Str8 date_str = STRUCT_ZERO;
+    
+    if (git_ok && git_info.length != 0)
+    {
+        uint8_t split_chars[] = {'\n', '\r'};
+        Str8_List lines = str8_split(scratch.arena, git_info, split_chars, ArrayLength(split_chars), 0);
+        if (lines.length >= 1)
+        {
+            commit_id = str8_skip_chop_whitespace(lines.first->str);
+        }
+        if (lines.length >= 2)
+        {
+            date_str = str8_skip_chop_whitespace(lines.first->next->str);
+        }
+    }
+    
+    // ak: fallback if git is not installed or not in a git repo
+    if (commit_id.length == 0 || date_str.length == 0)
+    {
+        fmt_eprintfln("Warning: git is not installed. using compiled date time as the version.");
+        git_ok = false;
+        commit_id = StructZeroType(Str8);
+        date_str = str8(BUILD_VERSION);
+    }
+    
+    // ak: if release build, warn if changes have not been committed to git
+    if (type == Build_Type_Release && git_ok)
+    {
+        local_persist bool warned_uncommitted = false;
+        if (!warned_uncommitted)
+        {
+            bool status_ok = false;
+            Str8 git_status = build_capture_cmd(str8("git status --porcelain"), scratch.arena, &status_ok);
+            if (status_ok && git_status.length != 0)
+            {
+                fmt_eprintfln("Warning: changes have not been committed to git.");
+                warned_uncommitted = true;
+            }
+        }
+    }
+    
+    // ak: format version string
+    Str8 result = STRUCT_ZERO;
+    if (commit_id.length != 0)
+    {
+        if (type_str.length != 0)
+        {
+            result = str8f(arena, "%s8 %s8 (%s8)", type_str, date_str, commit_id);
+        }
+        else
+        {
+            result = str8f(arena, "%s8 (%s8)", date_str, commit_id);
+        }
+    }
+    else
+    {
+        if (type_str.length != 0)
+        {
+            result = str8f(arena, "%s8 %s8", type_str, date_str);
+        }
+        else
+        {
+            result = str8f(arena, "%s8", date_str);
+        }
+    }
+    
+    arena_scratch_end(scratch);
+    return result;
 }

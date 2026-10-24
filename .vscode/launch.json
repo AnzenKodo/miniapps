@@ -16,7 +16,7 @@
             "program": "${workspaceFolder}/a.out",
             "cwd": "${workspaceFolder}",
             "type": "cppdbg",
-            "args": [ "build-run", "play", "release" ],
+            "args": [ "build" ],
             "arguments": "build-run",
             "preLaunchTask": "Build Build"
         },
