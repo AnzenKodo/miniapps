@@ -32,7 +32,7 @@ internal Process process_launch_from_cmd(Str8 string)
     while (i < string.size)
     {
         // ak: skip leading spaces
-        while (i < string.size && (string.cstr[i] == ' ' || string.cstr[i] == '\t'))
+        while (i < string.size && char_is_space(string.cstr[i]))
         {
             i += 1;
         }
@@ -64,7 +64,7 @@ internal Process process_launch_from_cmd(Str8 string)
                 i += 1;
                 buf[len++] = string.cstr[i++];
             }
-            else if ((c == ' ' || c == '\t') && !in_single && !in_double)
+            else if (char_is_space(c) && !in_single && !in_double)
             {
                 // ak: space outside quotes ends this token
                 break;
@@ -83,14 +83,6 @@ internal Process process_launch_from_cmd(Str8 string)
     Process process = STRUCT_ZERO;
     if(parts.length != 0)
     {
-        // ak: unpack exe part
-        Str8 exe = parts.first->str;
-        Str8 exe_folder = str8_chop_last_slash(exe);
-        if(exe_folder.length == 0)
-        {
-            exe_folder = current_path_get(scratch.arena);
-        }
-
         // ak: find stdout delimiter
         Str8_Node *stdout_delimiter_n = 0;
         for(Str8_Node *n = parts.first; n != 0; n = n->next)
@@ -128,7 +120,6 @@ internal Process process_launch_from_cmd(Str8 string)
         // ak: launch
         Process_Launch_Params params = STRUCT_ZERO;
         params.cmd_line = cmdline;
-        params.path = exe_folder;
         params.inherit_env = 1;
         params.stdout_file = stdout_handle;
         process = process_init(&params);

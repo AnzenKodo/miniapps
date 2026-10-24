@@ -87,7 +87,6 @@ global const char *help_message =
 internal uint64_t build_run_list(Str8_List cmd_list);
 internal uint64_t build_run_string(Str8 cmd);
 internal Str8 build_path(Build_Info *info);
-internal Str8 build_program_version_get(Build_Type type, Arena *arena);
 internal void build_log_tracef(Log_Level level, const char *format, ...);
 
 #define BuildLog(level, format, ...) build_log_tracef(Log_Level_##level, (format), ##__VA_ARGS__)
@@ -171,7 +170,7 @@ internal void build_compile_gcc_style_flags(Build_Info *info)
         str8_list_pushf(info->arena, &info->cmd, " -c");
     }
     // ak: add version
-    str8_list_pushf(info->arena, &info->cmd, " -DBUILD_VERSION='\"%s8\"'", build_program_version_get(info->type, info->arena));
+    str8_list_pushf(info->arena, &info->cmd, " -DBUILD_VERSION='\"%s\"'", BUILD_VERSION);
 }
 
 internal void build_compile_gcc(Build_Info *info)
@@ -532,25 +531,9 @@ internal uint64_t base_main(void)
 
 internal uint64_t build_run_list(Str8_List cmd_list)
 {
-    uint64_t exit_code = 0;
     Arena_Temp scratch = arena_scratch_begin(NULL, 0);
-    
-    fmt_printf("COMMAND: %s8\n", str8_list_join(scratch.arena, &cmd_list, 0));
-    Process process = process_launch_from_cmd_list(cmd_list);
-    if (process_is_zero(process))
-    {
-        BuildLog(Error, "failed to launch process.");
-        exit_code = 1;
-    }
-    else
-    {
-        bool joined = process_join(process, max_u64, &exit_code);
-        if (!joined)
-        {
-            BuildLog(Error, "failed waiting for process to finish.");
-        }
-    }
-    
+    Str8 cmd = str8_list_join(scratch.arena, &cmd_list, 0);
+    uint64_t exit_code = build_run_string(cmd);
     arena_scratch_end(scratch);
     return exit_code;
 }
@@ -628,122 +611,6 @@ internal Str8 build_path(Build_Info *info)
     }
     
     Str8 result = str8_list_join(info->arena, &list, NULL);
-    return result;
-}
-
-internal Str8 build_git_run_cmd(Str8 cmd, Arena *arena, bool *success_out)
-{
-    Str8 result = STRUCT_ZERO;
-    Arena_Temp scratch = arena_scratch_begin(&arena, 1);
-    
-    fs_dir_make(str8(BUILD_DIR));
-    Str8 out_path = str8(BUILD_DIR "/.git_tmp.txt");
-    Str8 dev_null = (Context_Os_CURRENT == Context_Os_Windows) ? str8("NUL") : str8("/dev/null");
-    
-    Str8 full_cmd = str8f(scratch.arena, "%s8 > %s8 2> %s8", cmd, out_path, dev_null);
-    Process process = process_launch_from_cmd(full_cmd);
-    
-    bool ok = false;
-    if (!process_is_zero(process))
-    {
-        uint64_t exit_code = 1;
-        if (process_join(process, max_u64, &exit_code) && exit_code == 0)
-        {
-            ok = true;
-            U8Array content = fs_file_path_read_full(out_path, arena);
-            result = str8_skip_chop_whitespace(str8_from_u8array(content));
-        }
-    }
-    
-    Fs_File f = fs_file_open(out_path, Fs_File_Access_Flag_Write);
-    fs_file_close(f);
-    
-    if (success_out != 0)
-    {
-        *success_out = ok;
-    }
-    
-    arena_scratch_end(scratch);
-    return result;
-}
-
-internal Str8 build_program_version_get(Build_Type type, Arena *arena)
-{
-    Str8 type_str = STRUCT_ZERO;
-    switch (type)
-    {
-        case Build_Type_Dev:
-        {
-            type_str = str8("Dev");
-        } break;
-        case Build_Type_Debug:
-        {
-            type_str = str8("Debug");
-        } break;
-        case Build_Type_Release: {} break;
-    }
-    
-    Arena_Temp scratch = arena_scratch_begin(&arena, 1);
-    
-    Str8 commit_id = STRUCT_ZERO;
-    Str8 version_date = STRUCT_ZERO;
-    
-    bool git_installed = false;
-    build_git_run_cmd(str8("git --version"), scratch.arena, &git_installed);
-    
-    if (!git_installed)
-    {
-        BuildLog(Warn, "git is not installed, using compile version date time instead.\n");
-        version_date = str8(BUILD_VERSION);
-    }
-    else
-    {
-        if (type == Build_Type_Release)
-        {
-            bool status_ok = false;
-            Str8 status_out = build_git_run_cmd(str8("git status --porcelain"), scratch.arena, &status_ok);
-            if (status_ok && status_out.length > 0)
-            {
-                BuildLog(Warn, "changes have not been committed to git.\n");
-            }
-        }
-        
-        bool commit_ok = false;
-        commit_id = build_git_run_cmd(str8("git log -1 --format=%h"), arena, &commit_ok);
-        
-        bool date_ok = false;
-        version_date = build_git_run_cmd(str8("git log -1 --date=format:\"%b %d %Y %H.%M.%S\" --format=%cd"), arena, &date_ok);
-        if (!date_ok || version_date.length == 0)
-        {
-            version_date = str8(BUILD_VERSION);
-        }
-    }
-    
-    Str8 result = STRUCT_ZERO;
-    if (commit_id.length > 0)
-    {
-        if (type_str.length > 0)
-        {
-            result = str8f(arena, "%s8 %s8 (%s8)", type_str, version_date, commit_id);
-        }
-        else
-        {
-            result = str8f(arena, "%s8 (%s8)", version_date, commit_id);
-        }
-    }
-    else
-    {
-        if (type_str.length > 0)
-        {
-            result = str8f(arena, "%s8 %s8", type_str, version_date);
-        }
-        else
-        {
-            result = str8f(arena, "%s8", version_date);
-        }
-    }
-    
-    arena_scratch_end(scratch);
     return result;
 }
 
