@@ -196,7 +196,8 @@ internal Str8_List str8_split_path(Arena *arena, Str8 string);
 
 // ak: String Split and Join ==================================================
 
-internal Str8_List str8_split(Arena *arena, Str8 str, uint8_t *split_chars, size_t split_char_count, Str_Split_Flags flags);
+internal Str8_List str8_split_n(Arena *arena, Str8 str, uint8_t *split_chars, size_t split_char_count, Str_Split_Flags flags);
+#define StrSplit(arena, string, split_chars, flags) str8_split_n((arena), (string), (uint8_t[])split_chars, ArrayLength(((uint8_t[])split_chars)), (flags))
 internal Str8 str8_list_join(Arena *arena, Str8_List *list, Str_Join *optional_params);
 
 // ak: String Formatting & Copying ============================================

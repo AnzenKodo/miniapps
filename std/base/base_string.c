@@ -747,7 +747,7 @@ internal Str8 str8_skip_last_dot(Str8 string)
 
 internal Str8_List str8_split_path(Arena *arena, Str8 string)
 {
-    Str8_List result = str8_split(arena, string, (uint8_t*)"/\\", 2, Str_Split_Flag_None);
+    Str8_List result = str8_split_n(arena, string, (uint8_t*)"/\\", 2, Str_Split_Flag_None);
     return result;
 }
 
@@ -755,7 +755,7 @@ internal Str8_List str8_split_path(Arena *arena, Str8 string)
 // ak: String Split and Join
 //=============================================================================
 
-internal Str8_List str8_split(Arena *arena, Str8 str, uint8_t *split_chars, size_t split_char_count, Str_Split_Flags flags)
+internal Str8_List str8_split_n(Arena *arena, Str8 str, uint8_t *split_chars, size_t split_char_count, Str_Split_Flags flags)
 {
     Str8_List list = STRUCT_ZERO;
     bool keep_empties = (flags & Str_Split_Flag_KeepEmpties);
