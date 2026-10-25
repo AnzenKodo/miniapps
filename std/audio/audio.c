@@ -1694,9 +1694,13 @@ internal float audio_music_time_played_get(Audio_Music music)
         uint64_t frames_in_buffers = frames_in_first_buffer + frames_in_second_buffer;
         if (((uint32_t)frames_in_buffers > music.frame_count) && !music.looping) frames_in_buffers = music.frame_count;
         uint64_t frames_sent_to_mix = _buffer->frame_cursor_pos%sub_buffer_size;
-        uint64_t frames_played = (frames_processed - frames_in_buffers + frames_sent_to_mix)%(size_t)music.frame_count;
-        frames_played += music.frame_count;
-        seconds_played = (float)frames_played/music.stream.sample_rate;
+        int64_t frames_played = 0;
+        if (music.frame_count > 0)
+        {
+            frames_played = ((int64_t)frames_processed - (int64_t)frames_in_buffers + (int64_t)frames_sent_to_mix) % (int64_t)music.frame_count;
+            if (frames_played < 0) frames_played += (int64_t)music.frame_count;
+        }
+        seconds_played = (float)frames_played / (float)music.stream.sample_rate;
         ma_mutex_unlock(&_audio_state->system.lock);
     }
     

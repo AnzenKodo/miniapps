@@ -19,7 +19,7 @@ internal void listen_flags_parse(Str8 *path)
 {
     bool help = false;
     bool version = false;
-    Str8 description = str8("Super simple CLI music player.");
+    Str8 description = str8("Terminal audio player.");
     Str8 usage = str8("[OPTIONS] <FILE>");
     
     flags_init();
@@ -57,21 +57,13 @@ internal void listen_flags_parse(Str8 *path)
     }
 }
 
-internal void listen_draw_ui(Str8 display_name, Audio_Music music, bool is_first_frame)
+internal void listen_draw_ui(Audio_Music music, bool is_first_frame)
 {
     Arena_Temp scratch = arena_scratch_begin(NULL, 0);
     
     float duration = audio_music_duration_get(music);
     float time_played = audio_music_time_played_get(music);
     Str8_List lines = STRUCT_ZERO;
-    
-    // ak: line 1: Track title
-    uint32_t max_name = 62;
-    if ((uint32_t)display_name.length > max_name)
-    {
-        display_name = str8f(scratch.arena, "%.*s...", max_name - 3, display_name.cstr);
-    }
-    str8_list_push(scratch.arena, &lines, display_name);
     
     // ak: line 2: Progress bar
     uint32_t bar_width = 48;
@@ -159,16 +151,16 @@ internal uint64_t base_main(void)
     Str8 file_name = str8_skip_last_slash(path);
     bool is_first_frame = true;
     
-    fmt_printf(TermSetTitle("PLAYING: %s8"), file_name);
-    fmt_print(str8(TERM_CURSOR_HIDE));
+#define PLAY_STRING "PLAYING: %s8"
+    fmt_printf(TermSetTitle(PLAY_STRING), file_name);
+    fmt_printfln(PLAY_STRING, file_name);
     while (audio_music_is_playing(music))
     {
         audio_music_update(music);
-        listen_draw_ui(file_name, music, is_first_frame);
+        listen_draw_ui(music, is_first_frame);
         is_first_frame = false;
         os_sleep_ms(50);
     }
-    fmt_print(str8("\n"TERM_CURSOR_SHOW));
     
     flags_uninit();
     audio_music_stop(music);
