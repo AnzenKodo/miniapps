@@ -23,7 +23,7 @@ internal void term_style_start(Fs_File file, Str8 style)
 
 internal void term_style_end(void)
 {
-    fmt_fprint(_term_state.file, TERM_RESET);
+    fmt_fprint(_term_state.file, str8(TERM_RESET));
     _term_state.file = 0;
 }
 
