@@ -57,12 +57,12 @@ jobs:
           cc build.c
 
           echo "Building ${PROGRAM} for x86_64 (glibc 2.17)..."
-          ./a.out build "$PROGRAM" release --zig -target x86_64-linux-gnu.2.17
+          ./a.out build "$PROGRAM" release --zig -target x86_64-linux-gnu.2.17 -I.
           cp "build/${PROGRAM}" "dist/${PROGRAM}-linux-x86_64"
           tar -czf "dist/${PROGRAM}-linux-x86_64.tar.gz" -C dist "${PROGRAM}-linux-x86_64"
 
           echo "Building ${PROGRAM} for aarch64 (glibc 2.17)..."
-          ./a.out build "$PROGRAM" release --zig -target aarch64-linux-gnu.2.17
+          ./a.out build "$PROGRAM" release --zig -target aarch64-linux-gnu.2.17 -I.
           cp "build/${PROGRAM}" "dist/${PROGRAM}-linux-aarch64"
           tar -czf "dist/${PROGRAM}-linux-aarch64.tar.gz" -C dist "${PROGRAM}-linux-aarch64"
 
