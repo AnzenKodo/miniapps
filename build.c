@@ -189,17 +189,28 @@ internal void build_compile_clang(Build_Info *info)
     build_compile_gcc_style_flags(info);
 }
 
-internal void build_compile(Build_Info *info)
+internal void build_compile_zig(Build_Info *info)
 {
-    if ((info->flags & Build_Flag_Cpp) && (info->flags & Build_Flag_Zig))
+    if (info->flags & Build_Flag_Cpp)
     {
         str8_list_pushf(info->arena, &info->cmd, "zig c++");
-        str8_list_pushf(info->arena, &info->cmd, " %s8", info->zig_args);
     }
-    else if (info->flags & Build_Flag_Zig)
+    else
     {
         str8_list_pushf(info->arena, &info->cmd, "zig cc");
+    }
+    if (info->zig_args.length > 0)
+    {
         str8_list_pushf(info->arena, &info->cmd, " %s8", info->zig_args);
+    }
+    build_compile_gcc_style_flags(info);
+}
+
+internal void build_compile(Build_Info *info)
+{
+    if (info->flags & Build_Flag_Zig)
+    {
+        build_compile_zig(info);
     }
     else if (Context_Compiler_CURRENT == Context_Compiler_Gcc)
     {
