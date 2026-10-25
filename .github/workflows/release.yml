@@ -1,0 +1,94 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      program:
+        description: 'Which program to build from ./src/* (e.g. listen)'
+        required: true
+        default: 'listen'
+        type: string
+      draft:
+        description: 'Draft release'
+        required: false
+        default: false
+        type: boolean
+      prerelease:
+        description: 'Prerelease'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v1
+        with:
+          version: 0.13.0
+
+      - name: Build 64-bit targets using build.c
+        run: |
+          set -euo pipefail
+
+          # Normalize program name (strip path and .c extension if provided)
+          PROGRAM="$(basename "${{ inputs.program }}" .c)"
+
+          SRC_FILE="src/${PROGRAM}.c"
+          if [ ! -f "$SRC_FILE" ]; then
+            echo "Error: source file '$SRC_FILE' does not exist."
+            echo "Available programs in src/:"
+            ls -1 src/*.c || true
+            exit 1
+          fi
+
+          mkdir -p dist
+
+          echo "Compiling build driver..."
+          cc build.c
+
+          echo "Building ${PROGRAM} for x86_64 (glibc 2.17)..."
+          ./a.out build "$PROGRAM" release --zig -target x86_64-linux-gnu.2.17
+          cp "build/${PROGRAM}" "dist/${PROGRAM}-linux-x86_64"
+          tar -czf "dist/${PROGRAM}-linux-x86_64.tar.gz" -C dist "${PROGRAM}-linux-x86_64"
+
+          echo "Building ${PROGRAM} for aarch64 (glibc 2.17)..."
+          ./a.out build "$PROGRAM" release --zig -target aarch64-linux-gnu.2.17
+          cp "build/${PROGRAM}" "dist/${PROGRAM}-linux-aarch64"
+          tar -czf "dist/${PROGRAM}-linux-aarch64.tar.gz" -C dist "${PROGRAM}-linux-aarch64"
+
+          cd dist
+          sha256sum *.tar.gz > SHA256SUMS.txt
+          cd ..
+
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PROGRAM="$(basename "${{ inputs.program }}" .c)"
+          TAG_NAME="${PROGRAM}-v$(date +'%Y.%m.%d-%H%M%S')"
+          TITLE="${PROGRAM} $(date +'%Y-%m-%d %H:%M:%S')"
+
+          EXTRA_FLAGS=()
+          if [ "${{ inputs.draft }}" = "true" ]; then
+            EXTRA_FLAGS+=("--draft")
+          fi
+          if [ "${{ inputs.prerelease }}" = "true" ]; then
+            EXTRA_FLAGS+=("--prerelease")
+          fi
+
+          gh release create "$TAG_NAME" \
+            dist/*.tar.gz \
+            dist/SHA256SUMS.txt \
+            --title "$TITLE" \
+            --generate-notes \
+            "${EXTRA_FLAGS[@]}"

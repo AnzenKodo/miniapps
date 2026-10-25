@@ -7,65 +7,33 @@
 #ifndef BASE_FLAGS_H
 #define BASE_FLAGS_H
 
-// ak: Types
+//~ ak: Types
 //=============================================================================
 
-typedef enum _Flags_Error_Kind
+typedef enum Flags_Option_Kind
 {
-    _Flags_Error_Kind_MissingValue,
-    _Flags_Error_Kind_UnknownOption,
-    _Flags_Error_Kind_NoFlagPrefix,
-    _Flags_Error_Kind_DuplicateOption,
-    _Flags_Error_Kind_SingleValue,
-    _Flags_Error_Kind_InvalidBool,
-    _Flags_Error_Kind_OutIndexArg,
-    // ak: Option Enums
-    _Flags_Error_Kind_RequireOption,
-    _Flags_Error_Kind_InvalidIntOption,
-    _Flags_Error_Kind_UIntMinusOption,
-    _Flags_Error_Kind_InvalidFloatOption,
-    // ak: Arg Enums
-    _Flags_Error_Kind_RequireArg,
-    _Flags_Error_Kind_InvalidIntArg,
-    _Flags_Error_Kind_UIntMinusArg,
-    _Flags_Error_Kind_InvalidFloatArg,
-    _Flags_Error_Kind_OptionAfterArg,
-} _Flags_Error_Kind;
+    Flags_Option_Kind_Str,
+    Flags_Option_Kind_Int,
+    Flags_Option_Kind_UInt,
+    Flags_Option_Kind_Float,
+    Flags_Option_Kind_Bool,
+    Flags_Option_Kind_StrArr,
+    Flags_Option_Kind_IntArr,
+    Flags_Option_Kind_UIntArr,
+    Flags_Option_Kind_FloatArr,
+} Flags_Option_Kind;
 
-typedef enum _Flags_Option_Kind
+typedef enum Flags_Arg_Kind
 {
-    _Flags_Option_Kind_Str,
-    _Flags_Option_Kind_Int,
-    _Flags_Option_Kind_UInt,
-    _Flags_Option_Kind_Float,
-    _Flags_Option_Kind_Bool,
-    _Flags_Option_Kind_StrArr,
-    _Flags_Option_Kind_IntArr,
-    _Flags_Option_Kind_UIntArr,
-    _Flags_Option_Kind_FloatArr,
-} _Flags_Option_Kind;
-
-typedef enum _Flags_Arg_Kind
-{
-    _Flags_Arg_Kind_Str,
-    _Flags_Arg_Kind_Int,
-    _Flags_Arg_Kind_UInt,
-    _Flags_Arg_Kind_Float,
-    _Flags_Arg_Kind_StrArr,
-    _Flags_Arg_Kind_IntArr,
-    _Flags_Arg_Kind_UIntArr,
-    _Flags_Arg_Kind_FloatArr,
-} _Flags_Arg_Kind;
-
-typedef struct _Flags_Error _Flags_Error;
-struct _Flags_Error
-{
-    _Flags_Error *next;
-    _Flags_Error_Kind kind;
-    Str8 flag_name;
-    Str8 value;
-    size_t arg_index;
-};
+    Flags_Arg_Kind_Str,
+    Flags_Arg_Kind_Int,
+    Flags_Arg_Kind_UInt,
+    Flags_Arg_Kind_Float,
+    Flags_Arg_Kind_StrArr,
+    Flags_Arg_Kind_IntArr,
+    Flags_Arg_Kind_UIntArr,
+    Flags_Arg_Kind_FloatArr,
+} Flags_Arg_Kind;
 
 typedef struct Flags_Option Flags_Option;
 struct Flags_Option
@@ -99,7 +67,7 @@ struct Flags_Option
         U64Array *uint_value_arr;
         F64Array *float_value_arr;
     } result_value;
-    _Flags_Option_Kind kind;
+    Flags_Option_Kind kind;
     bool assigned;
     bool required;
 };
@@ -108,7 +76,7 @@ typedef struct Flags_Arg Flags_Arg;
 struct Flags_Arg
 {
     Flags_Arg *next;
-    _Flags_Arg_Kind kind;
+    Flags_Arg_Kind kind;
     size_t index;
     union
     {
@@ -138,54 +106,30 @@ struct Flags_Arg
     bool required;
 };
 
-typedef struct _Flags_State _Flags_State;
-struct _Flags_State
-{
-    Arena *arena;
-    Flags_Option *first_option;
-    Flags_Option *last_option;
-    _Flags_Error *first_error;
-    _Flags_Error *last_error;
-    Flags_Arg *first_arg;
-    Flags_Arg *last_arg;
-    size_t index_arg;
-    bool has_error;
-    bool is_arg_array_assigned;
-};
-
-// ak: Functions
+//~ ak: Functions
 //=============================================================================
 
-// ak: Private functions ======================================================
-
-internal Flags_Option *_flags_get_options(Str8 name);
-internal void _flags_add_option(Flags_Option *option);
-internal Flags_Arg *_flags_get_arg(size_t index);
-internal void _flags_add_arg(Flags_Arg *arg);
-internal void _flags_add_option_error(_Flags_Error_Kind kind, Str8 name);
-internal void _flags_add_option_error_value(_Flags_Error_Kind kind, Str8 name, Str8 value);
-internal void _flags_add_error_arg(_Flags_Error_Kind kind, size_t index, Str8 value);
-internal bool _flags_is_arg_option(Str8 arg);
-internal Str8 _flags_get_options_from_arg(Str8 arg);
-internal uint64_t _flags_get_values_count(Str8_Array *args, uint64_t index, bool is_arr_arg);
-
-// ak: Flags core functions ===================================================
+//- ak: Core ==================================================================
 
 internal void flags_init(void);
 internal void flags_uninit(void);
 internal bool flags_parse(Str8_Array *args);
+
+//- ak: Print Flags ============================================================
+
 internal void flags_print_error(void);
-internal void flags_print_help(void);
+internal void flags_print_help(Str8 description, Str8 usage);
+internal void flags_print_version(void);
+internal void flags_print_options(void);
 
-// ak: Flags config functions =================================================
+//- ak: Config Flags ==========================================================
 
-internal void flags_has_program_name(bool has_name);
 internal void flags_add_option_shortname(Flags_Option *option, Str8 shortname);
 internal void flags_add_option_value_hint(Flags_Option *option, Str8 value_hint);
 internal void flags_make_option_required(Flags_Option *option);
 internal void flags_make_arg_required(Flags_Arg *arg);
 
-// ak: Add option flag ========================================================
+//- ak: Options Flags =========================================================
 
 internal Flags_Option *flags_option_str(Str8 name, Str8 *result_value, Str8 default_value, Str8 description);
 internal Flags_Option *flags_option_int(Str8 name, int64_t *result_value, int64_t default_value, Str8 description);
@@ -198,7 +142,7 @@ internal Flags_Option *flags_option_int_arr(Str8 name, I64Array *result_value, I
 internal Flags_Option *flags_option_uint_arr(Str8 name, U64Array *result_value, U64Array *default_value, Str8 description);
 internal Flags_Option *flags_option_float_arr(Str8 name, F64Array *result_value, F64Array *default_value, Str8 description);
 
-// ak: Add value flag =========================================================
+//- ak: Arguments Flags =======================================================
 
 internal Flags_Arg *flags_arg_str(Str8 *result_value, Str8 default_value);
 internal Flags_Arg *flags_arg_int(int64_t *result_value, int64_t default_value);
@@ -210,7 +154,8 @@ internal Flags_Arg *flags_arg_int_arr(I64Array *result_value, I64Array *default_
 internal Flags_Arg *flags_arg_uint_arr(U64Array *result_value, U64Array *default_value);
 internal Flags_Arg *flags_arg_float_arr(F64Array *result_value, F64Array *default_value);
 
-// ak: Generic Macros =========================================================
+//~ ak: Generic Macros
+//=============================================================================
 
 #if LANGUAGE_CPP
     inline Flags_Option *flags_option(Str8 name, Str8* val, Str8 def, Str8 desc) { return flags_option_str(name, val, def, desc); }
@@ -255,10 +200,5 @@ internal Flags_Arg *flags_arg_float_arr(F64Array *result_value, F64Array *defaul
         F64Array*:    flags_arg_float_arr \
     )(result_value, default_value)
 #endif
-
-// ak: Globals
-//=============================================================================
-
-global _Flags_State *_flags_state = 0;
 
 #endif // BASE_FLAGS_H

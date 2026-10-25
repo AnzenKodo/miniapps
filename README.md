@@ -12,8 +12,10 @@ TODO:
     - https://go.dev/doc/modules/version-numbers
     - https://github.com/joelparkerhenderson/versioning
     - https://x.com/TheGingerBill/status/2029216307111936135
+- [ ] fix this: [ERROR] at least 1 argument is required.
+- [x] add option to provide flags in build
 - [ ] Add github release action
 - [ ] Write README.md
-- [ ] check spelling
+- [x] check spelling
 
 https://www.youtube.com/watch?v=N409lV1cPy8

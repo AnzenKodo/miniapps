@@ -39,6 +39,7 @@ enum
     Build_Flag_Cpp          = (1<<2),
     Build_Flag_Static_Lib   = (1<<3),
     Build_Flag_Dynamic_Lib  = (1<<4),
+    Build_Flag_Zig          = (1<<5),
 };
 
 typedef struct Build_Info Build_Info;
@@ -49,6 +50,7 @@ struct Build_Info
     Str8 name;
     Str8 entry_point;
     Str8 args;
+    Str8 zig_args;
     Build_Type type;
     Build_Flags flags;
 };
@@ -62,6 +64,7 @@ internal uint64_t build_run_list(Str8_List cmd_list);
 internal uint64_t build_run_string(Str8 cmd);
 internal Str8 build_path(Build_Info *info);
 internal void build_log_tracef(Log_Level level, const char *format, ...);
+internal bool is_custom_args_flag(Str8 name);
 
 #define BuildLog(level, format, ...) build_log_tracef(Log_Level_##level, (format), ##__VA_ARGS__)
 
@@ -128,7 +131,16 @@ internal void build_compile_gcc_style_flags(Build_Info *info)
         " -Wno-unused-variable"
     );
     // ak: security
-    str8_list_pushf(info->arena, &info->cmd, " -mshstk -fcf-protection=full -fstack-protector");
+    bool is_arm = (str8_find_substr(info->zig_args, 0, str8("aarch64"), 0) < info->zig_args.length ||
+                   str8_find_substr(info->zig_args, 0, str8("arm"), 0) < info->zig_args.length);
+    if (is_arm)
+    {
+        str8_list_pushf(info->arena, &info->cmd, " -fstack-protector");
+    }
+    else
+    {
+        str8_list_pushf(info->arena, &info->cmd, " -mshstk -fcf-protection=full -fstack-protector");
+    }
     if ((info->type != Build_Type_Debug && info->type != Build_Type_Release) && !(info->flags & Build_Flag_MingW))
     {
         str8_list_pushf(info->arena, &info->cmd, " -fsanitize=address -fno-omit-frame-pointer");
@@ -179,7 +191,17 @@ internal void build_compile_clang(Build_Info *info)
 
 internal void build_compile(Build_Info *info)
 {
-    if (Context_Compiler_CURRENT == Context_Compiler_Gcc)
+    if ((info->flags & Build_Flag_Cpp) && (info->flags & Build_Flag_Zig))
+    {
+        str8_list_pushf(info->arena, &info->cmd, "zig c++");
+        str8_list_pushf(info->arena, &info->cmd, " %s8", info->zig_args);
+    }
+    else if (info->flags & Build_Flag_Zig)
+    {
+        str8_list_pushf(info->arena, &info->cmd, "zig cc");
+        str8_list_pushf(info->arena, &info->cmd, " %s8", info->zig_args);
+    }
+    else if (Context_Compiler_CURRENT == Context_Compiler_Gcc)
     {
         build_compile_gcc(info);
     }
@@ -289,6 +311,10 @@ internal uint64_t build_compile_program(Build_Info *info, Build_Info *ma_info)
         {
             str8_list_pushf(scratch.arena, &info->cmd, " -lopengl32 -luser32 -lgdi32");
         }
+        else if (info->flags & Build_Flag_Zig)
+        {
+            str8_list_pushf(scratch.arena, &info->cmd, " -DMINIAUDIO_IMPLEMENTATION -lm -lpthread -ldl");
+        }
         else
         {
             str8_list_pushf(scratch.arena, &info->cmd, " -lm -lpthread");
@@ -358,6 +384,7 @@ internal uint64_t base_main(void)
     Str8 target_arg = STRUCT_ZERO;
     Str8 config_arg = STRUCT_ZERO;
     Str8 custom_args = STRUCT_ZERO;
+    Str8 zig_args = STRUCT_ZERO;
     
     Str8_Array *args = term_args_get();
     for (uint64_t i = 1; i < args->length; i++)
@@ -381,6 +408,24 @@ internal uint64_t base_main(void)
             break;
         }
         
+        // ak: check for zig flag
+        if (str8_match(arg, str8("--zig"), 0))
+        {
+            info.flags |= Build_Flag_Zig;
+            for (uint64_t j = i + 1; j < args->length; j++)
+            {
+                if (zig_args.length == 0)
+                {
+                    zig_args = args->v[j];
+                }
+                else
+                {
+                    zig_args = str8f(arena, "%s8 %s8", zig_args, args->v[j]);
+                }
+            }
+            break;
+        }
+
         if (str8_match(arg, str8("--mingw"), 0))
         {
             info.flags |= Build_Flag_MingW;
@@ -477,6 +522,7 @@ internal uint64_t base_main(void)
     }
     
     info.args = custom_args;
+    info.zig_args = zig_args;
     
     if (only_run_program || run_program)
     {
@@ -515,17 +561,27 @@ internal uint64_t base_main(void)
             BuildLog(Info, "created '"BUILD_DIR"' directory.\n");
         }
         
-        // ak: build miniaudio lib
+        // ak: build miniaudio lib (skip when compiling with zig)
         Build_Info ma_info = STRUCT_ZERO;
-        ma_info.name = str8("libminiaudio");
-        ma_info.entry_point = str8("std/audio/external/miniaudio.h");
-        ma_info.type = info.type;
-        ma_info.flags = info.type == Build_Type_Release ? Build_Flag_Static_Lib : Build_Flag_Dynamic_Lib;
-        ma_info.arena = arena;
-        exit_code = build_compile_miniaudio(&ma_info);
-        if (exit_code == 0)
+        if (!(info.flags & Build_Flag_Zig))
         {
+            ma_info.name = str8("libminiaudio");
+            if (fs_file_path_exists(str8("std/audio/vendor/miniaudio.h")))
+            {
+                ma_info.entry_point = str8("std/audio/vendor/miniaudio.h");
+            }
+            else
+            {
+                ma_info.entry_point = str8("std/audio/external/miniaudio.h");
+            }
+            ma_info.type = info.type;
+            ma_info.flags = info.type == Build_Type_Release ? Build_Flag_Static_Lib : Build_Flag_Dynamic_Lib;
+            ma_info.arena = arena;
             exit_code = build_compile_miniaudio(&ma_info);
+            if (exit_code == 0)
+            {
+                exit_code = build_compile_miniaudio(&ma_info);
+            }
         }
         
         // ak: build metadesk
