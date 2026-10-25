@@ -92,7 +92,9 @@ internal void os_sleep_ms(uint32_t millisec)
 internal bool os_is_env_exists(Str8 name)
 {
     bool result = false;
-    for (char **e = environ; *e != NULL; e++)
+    char **env_list = environ ? environ : __environ;
+    if (env_list == NULL) return false;
+    for (char **e = env_list; *e != NULL; e++)
     {
         Str8 env = str8_from_cstr(*e);
         uint64_t equal_pos = str8_find_substr(env, 0, str8("="), Str_Match_Flag_None);
@@ -109,7 +111,9 @@ internal bool os_is_env_exists(Str8 name)
 internal Str8 os_env_get(Str8 name)
 {
     Str8 result = STRUCT_ZERO;
-    for (char **e = environ; *e != NULL; e++)
+    char **env_list = environ ? environ : __environ;
+    if (env_list == NULL) return result;
+    for (char **e = env_list; *e != NULL; e++)
     {
         Str8 env = str8_from_cstr(*e);
         uint64_t equal_pos = str8_find_substr(env, 0, str8("="), Str_Match_Flag_None);
@@ -125,8 +129,12 @@ internal Str8 os_env_get(Str8 name)
 
 //~ ak: OS Entry Points =======================================================
 
-int main(int argc, char *argv[])
+int main(int argc, char *argv[], char **envp)
 {
+    if (environ == NULL && envp != NULL)
+    {
+        environ = envp;
+    }
     // ak: set up dynamically allocated state
     _os_linux_state.arena = arena_alloc();
     
@@ -140,6 +148,32 @@ int main(int argc, char *argv[])
         }
     }
     
+    // ak: get system/process info
+    Process_Info *info = &_os_core_state.process_info;
+    info->pid = (uint32_t)getpid();
+    
+    // ak: cache default environment
+    {
+        char **cur_env = environ ? environ : __environ;
+        uint64_t env_count = 0;
+        if (cur_env != NULL)
+        {
+            for(; cur_env[env_count] != 0; env_count += 1) {}
+        }
+
+        char **default_env = arena_push(_os_linux_state.arena, char *, env_count+1);
+        for EachIndex(idx, env_count)
+        {
+            Str8 entry = str8_copy(_os_linux_state.arena, str8_from_cstr(cur_env[idx]));
+            default_env[idx] = (char *)entry.cstr;
+            str8_list_push(_os_linux_state.arena, &_os_core_state.process_info.environment, entry);
+        }
+        default_env[env_count] = 0;
+
+        _os_linux_state.default_env_count = env_count;
+        _os_linux_state.default_env       = default_env;
+    }
+     
     // ak: get os data home path
     {
         if (os_is_env_exists(str8("XDG_DATA_HOME")))
@@ -158,29 +192,7 @@ int main(int argc, char *argv[])
             }
         }
     }
-    
-    // ak: get system/process info
-    Process_Info *info = &_os_core_state.process_info;
-    info->pid = (uint32_t)getpid();
-    
-    // ak: cache default environment
-    {
-        uint64_t env_count = 0;
-        for(; __environ[env_count] != 0; env_count += 1) {}
-
-        char **default_env = arena_push(_os_linux_state.arena, char *, env_count+1);
-        for EachIndex(idx, env_count)
-        {
-            Str8 entry = str8_copy(_os_linux_state.arena, str8_from_cstr(__environ[idx]));
-            default_env[idx] = (char *)entry.cstr;
-            str8_list_push(_os_linux_state.arena, &_os_core_state.process_info.environment, entry);
-        }
-        default_env[env_count] = 0;
-
-        _os_linux_state.default_env_count = env_count;
-        _os_linux_state.default_env       = default_env;
-    }
-    
+     
     // ak: os entry point
     return os_main();
 }

@@ -10,8 +10,6 @@
 //~ak: External Includes
 //=============================================================================
 
-#define _POSIX_C_SOURCE 200809L
-
 #include <dirent.h>
 #include <unistd.h>
 #include <sys/mman.h>
