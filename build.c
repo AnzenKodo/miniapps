@@ -63,8 +63,8 @@ struct Build_Info
 internal uint64_t build_run_list(Str8_List cmd_list);
 internal uint64_t build_run_string(Str8 cmd);
 internal Str8 build_path(Build_Info *info);
+internal Str8 build_version_from_type(Build_Type type, Arena *arena);
 internal void build_log_tracef(Log_Level level, const char *format, ...);
-internal bool is_custom_args_flag(Str8 name);
 
 #define BuildLog(level, format, ...) build_log_tracef(Log_Level_##level, (format), ##__VA_ARGS__)
 
@@ -156,7 +156,7 @@ internal void build_compile_gcc_style_flags(Build_Info *info)
         str8_list_pushf(info->arena, &info->cmd, " -c");
     }
     // ak: add version
-    str8_list_pushf(info->arena, &info->cmd, " -DBUILD_VERSION='\"%s\"'", BUILD_VERSION);
+    str8_list_pushf(info->arena, &info->cmd, " -DBUILD_VERSION='\"%s8\"'", build_version_from_type(info->type, info->arena));
 }
 
 internal void build_compile_gcc(Build_Info *info)
@@ -339,19 +339,20 @@ internal uint64_t build_compile_program(Build_Info *info, Build_Info *ma_info)
 
 // ak: Build Entry Point ======================================================
 
-global const char *help_message =
+global Str8 help_message = str8(
 "DESCRIPTION:\n"
 "   Build driver for compiling and running C projects.\n\n"
 "USAGE:\n"
 "   build [COMMAND] [TARGET] [CONFIG] [-- <args>]\n\n"
 "COMMANDS:\n"
-"   build                Compile target program(s) (default)\n"
-"   run                  Run target program (builds first if not present)\n"
-"   build-run            Compile and run target program\n"
-"   build-dry            Check syntax without producing output files\n"
-"   build-debugger       Compile with full debug information (-ggdb -g3)\n"
-"   gen-meta             Generate code using MetaDesk metaprogram\n"
-"   help, -h, --help     Print this help message\n\n"
+"   build                  Compile target program(s) (default)\n"
+"   run                    Run target program (builds first if not present)\n"
+"   build-run              Compile and run target program\n"
+"   build-dry              Check syntax without producing output files\n"
+"   build-debugger         Compile with full debug information (-ggdb -g3)\n"
+"   gen-meta               Generate code using MetaDesk metaprogram\n"
+"   help, -h, --help       Print this help message\n\n"
+"   version, -v, --version Print this help message\n\n"
 "ARGUMENTS:\n"
 "   [TARGET]             Name of program in src/<name>.c (e.g. 'listen').\n"
 "                        Defaults to 'all' (builds every program in src/).\n"
@@ -365,7 +366,8 @@ global const char *help_message =
 "   ./build run listen -- --help          Run 'listen' with arguments\n"
 "   ./build build-run listen              Build and run 'listen'\n"
 "   ./build build-run listen -- --help    Build and run 'listen' with arguments\n"
-"   ./build build-debugger listen         Build 'listen' for debugger\n";
+"   ./build build-debugger listen         Build 'listen' for debugger\n"
+);
 
 internal uint64_t base_main(void)
 {
@@ -375,6 +377,7 @@ internal uint64_t base_main(void)
     info.arena = arena;
     
     bool should_print_help = false;
+    bool should_print_version = false;
     bool run_program = false;
     bool only_run_program = false;
     bool gen_meta_program = false;
@@ -460,6 +463,13 @@ internal uint64_t base_main(void)
         {
             should_print_help = true;
         }
+        else if (cmd_arg.length == 0 ||
+            str8_match(cmd_arg, str8("version"), 0) ||
+            str8_match(cmd_arg, str8("--version"), 0) ||
+            str8_match(cmd_arg, str8("-v"), 0))
+        {
+            should_print_version = true;
+        }
         else
         {
             info.name = (target_arg.length > 0) ? target_arg : str8("all");
@@ -514,7 +524,7 @@ internal uint64_t base_main(void)
             }
             else
             {
-                fmt_printf("%s", help_message);
+                fmt_print(help_message);
                 BuildLog(Error, "wrong option provided `%s8`.", cmd_arg);
                 exit_code = 1;
             }
@@ -528,7 +538,7 @@ internal uint64_t base_main(void)
     {
         if (str8_match(info.name, str8("all"), 0))
         {
-            fmt_printf("%s", help_message);
+            fmt_print(help_message);
             BuildLog(Error, "please specify a single program name.");
             exit_code = 1;
         }
@@ -541,7 +551,11 @@ internal uint64_t base_main(void)
     
     if (should_print_help)
     {
-        fmt_printf("%s", help_message);
+        fmt_print(help_message);
+    }
+    else if (should_print_version)
+    {
+        fmt_print(str8(BUILD_VERSION));
     }
     else if (exit_code != 0)
     {
@@ -621,7 +635,7 @@ internal uint64_t base_main(void)
             }
             if (str8_match(name, str8("all"), 0) && run_program)
             {
-                fmt_printf("%s", help_message);
+                fmt_print(help_message);
                 BuildLog(Error, "please specify a single program name.");
                 exit_code = 1;
             }
@@ -720,6 +734,30 @@ internal Str8 build_path(Build_Info *info)
     
     Str8 result = str8_list_join(info->arena, &list, NULL);
     return result;
+}
+
+internal Str8 build_version_from_type(Build_Type type, Arena *arena)
+{
+    Str8 prefix = STRUCT_ZERO;
+    switch (type)
+    {
+        case Build_Type_Dev:
+        {
+            prefix = str8("Dev");
+        }
+        break;
+        case Build_Type_Debug:
+        {
+            prefix = str8("Debug");
+        }
+        break;
+        case Build_Type_Release:
+        {
+            prefix = str8("Debug");
+        }
+        break;
+    }
+    return str8f(arena, "%s8_%s", prefix, BUILD_VERSION);
 }
 
 internal void build_log_tracef(Log_Level level, const char *format, ...)

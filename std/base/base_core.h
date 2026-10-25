@@ -26,9 +26,9 @@
 // Neovim's errorformat reads "hh:mm:ss" as file:line:col, so the quickfix list
 // gets a bogus entry. Using '-' instead of ':' avoids that.
 static const char BUILD_VERSION[] = {
-    __DATE__[0], __DATE__[1], __DATE__[2], __DATE__[3], __DATE__[4], __DATE__[5],
-    __DATE__[6], __DATE__[7], __DATE__[8], __DATE__[9], __DATE__[10], ' ',
-    __TIME__[0], __TIME__[1], '.', __TIME__[3], __TIME__[4], '.', __TIME__[6], __TIME__[7],
+    __DATE__[4], __DATE__[5], '-', __DATE__[0], __DATE__[1], __DATE__[2], '-',
+    __DATE__[7], __DATE__[8], __DATE__[9], __DATE__[10], '_',
+    __TIME__[0], __TIME__[1], '-', __TIME__[3], __TIME__[4], '-', __TIME__[6], __TIME__[7],
     0 };
 #endif
 
