@@ -45,7 +45,7 @@ jobs:
 
           SRC_FILE="src/${PROGRAM}.c"
           if [ ! -f "$SRC_FILE" ]; then
-            echo "Error: source file '$SRC_FILE' does not exist."
+            echo "[ERROR] source file '$SRC_FILE' does not exist."
             echo "Available programs in src/:"
             ls -1 src/*.c || true
             exit 1
@@ -53,7 +53,7 @@ jobs:
 
           mkdir -p dist
 
-          echo "Compiling build driver..."
+          echo "Compiling build..."
           cc build.c
 
           echo "Building ${PROGRAM} for x86_64 (glibc 2.17)..."
@@ -75,8 +75,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           PROGRAM="$(basename "${{ inputs.program }}" .c)"
-          TAG_NAME="${PROGRAM}-v$(date +'%Y.%m.%d-%H%M%S')"
-          TITLE="${PROGRAM} $(date +'%Y-%m-%d %H:%M:%S')"
+          VERSION="$("./dist/${PROGRAM}-linux-x86_64" -v | tr -d '\r' | xargs)"
+          TAG_NAME="${PROGRAM}_${VERSION}"
+          TITLE="${PROGRAM}_${VERSION}"
 
           EXTRA_FLAGS=()
           if [ "${{ inputs.draft }}" = "true" ]; then
