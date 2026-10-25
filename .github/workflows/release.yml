@@ -32,9 +32,9 @@ jobs:
           fetch-depth: 1
 
       - name: Setup Zig
-        uses: mlugg/setup-zig@v1
+        uses: mlugg/setup-zig@v2
         with:
-          version: 0.16.0
+          version: 0.17.0
 
       - name: Build 64-bit targets using build.c
         run: |
