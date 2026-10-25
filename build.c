@@ -753,7 +753,7 @@ internal Str8 build_version_from_type(Build_Type type, Arena *arena)
         break;
         case Build_Type_Release:
         {
-            prefix = str8("Debug");
+            prefix = str8("Release");
         }
         break;
     }

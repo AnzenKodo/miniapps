@@ -4,19 +4,15 @@ name: MiniApps
 theme: Grove
 target:
 {
-  executable: "build/play_debug"
+  executable: "build/listen_debug"
   working_directory: "../Miniapps"
   arguments: "assets/sound.mp3"
-}
-watch_pin:
-{
-  expression: message
-  source_location: "std/audio/audio.c:138:1"
+  enabled: 1
 }
 target:
 {
   executable: "a.out"
   working_directory: ""
   arguments: "build-run"
-  enabled: 1
+  label: "Debug Build"
 }
