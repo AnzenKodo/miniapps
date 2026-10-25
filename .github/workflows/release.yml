@@ -76,8 +76,8 @@ jobs:
         run: |
           PROGRAM="$(basename "${{ inputs.program }}" .c)"
           VERSION="$("./dist/${PROGRAM}-linux-x86_64" -v | tr -d '\r' | xargs)"
-          TAG_NAME="${PROGRAM}_${VERSION}"
-          TITLE="${PROGRAM}_${VERSION}"
+          TAG_NAME="${PROGRAM}-${VERSION}"
+          TITLE="${PROGRAM}-${VERSION}"
 
           EXTRA_FLAGS=()
           if [ "${{ inputs.draft }}" = "true" ]; then

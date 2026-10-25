@@ -762,7 +762,16 @@ internal Str8 build_path(Build_Info *info)
 
 internal Str8 build_version_from_type(Build_Type type, Arena *arena)
 {
-    return str8f(arena, "%s8_%s", build_type_string_from_type(type), BUILD_VERSION);
+    static const char *month_names[] = {
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+    };
+    DateTime dt = date_time_from_unix_time(time_now_unix());
+    const char *month = (dt.month < Month_COUNT) ? month_names[dt.month] : "Unknown";
+    return str8f(arena, "%s8_%02d-%s-%04d_%02d-%02d-%02d",
+                 build_type_string_from_type(type),
+                 dt.day, month, dt.year,
+                 dt.hour, dt.min, dt.sec);
 }
 
 internal void build_log_tracef(Log_Level level, const char *format, ...)
