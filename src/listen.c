@@ -6,43 +6,55 @@
 #include "std/os/os_include.c"
 #include "std/audio/audio.c"
 
-internal bool listen_flags_parse(Str8 *path)
+internal void listen_eprintfln(const char *format, ...)
 {
-    bool result = true;
+    fmt_eprintf("%s8 ", log_level_string_get(Log_Level_Error));
+    va_list args;
+    va_start(args, format);
+        fmt_veprintfln(format, args);
+    va_end(args);
+}
+
+internal void listen_flags_parse(Str8 *path)
+{
     bool help = false;
     bool version = false;
-    Str8 description = str8("");
+    Str8 description = str8("Super simple CLI music player.");
     Str8 usage = str8("[OPTIONS] <FILE>");
-
+    
     flags_init();
     Flags_Option *option = NULL;
-    Flags_Arg *arg = NULL;
-
+    
     option = flags_option_bool(str8("help"), &help, help, str8("Print help message"));
     flags_add_option_shortname(option, str8("h"));
-
-    option = flags_option_bool(str8("version"), &help, help, str8("Print version"));
+    option = flags_option_bool(str8("version"), &version, help, str8("Print version"));
     flags_add_option_shortname(option, str8("v"));
-
-    arg = flags_arg_str(path, StructZeroType(Str8));
-    flags_make_arg_required(arg);
-
+    
+    flags_arg_str(path, StructZeroType(Str8));
+    
     Str8_Array *args = term_args_get();
     if (!flags_parse(args))
     {
         flags_print_help(description, usage);
         flags_print_error();
-        result = false;
+        os_exit(1);
     }
     else if (help)
     {
         flags_print_help(description, usage);
+        os_exit(0);
     }
     else if (version)
     {
         flags_print_version();
+        os_exit(0);
     }
-    return result;
+    else if (path->length == 0)
+    {
+        flags_print_help(description, usage);
+        listen_eprintfln("<FILE> path is empty.");
+        os_exit(1);
+    }
 }
 
 internal void listen_draw_ui(Str8 display_name, Audio_Music music, bool is_first_frame)
@@ -53,7 +65,7 @@ internal void listen_draw_ui(Str8 display_name, Audio_Music music, bool is_first
     float time_played = audio_music_time_played_get(music);
     Str8_List lines = STRUCT_ZERO;
     
-    // Line 1: Track title
+    // ak: line 1: Track title
     uint32_t max_name = 62;
     if ((uint32_t)display_name.length > max_name)
     {
@@ -61,7 +73,7 @@ internal void listen_draw_ui(Str8 display_name, Audio_Music music, bool is_first
     }
     str8_list_push(scratch.arena, &lines, display_name);
     
-    // Line 2: Progress bar
+    // ak: line 2: Progress bar
     uint32_t bar_width = 48;
     float progress = (duration > 0.0f) ? (time_played / duration) : 0.0f;
     if (progress > 1.0f) progress = 1.0f;
@@ -92,16 +104,16 @@ internal void listen_draw_ui(Str8 display_name, Audio_Music music, bool is_first
     str8_list_pushf(scratch.arena, &lines, "%02d:%02d [%.*s] %02d:%02d",
         cur_mins, cur_secs, str8_varg(bar_str), dur_mins, dur_secs);
     
-    // Build frame output in a single atomic Str8_List buffer
+    // ak: build frame output in a single atomic Str8_List buffer
     Str8_List out = STRUCT_ZERO;
     if (!is_first_frame)
     {
-        str8_list_pushf(scratch.arena, &out, "\x1B[%dA\r", (int)(lines.length - 1));
+        str8_list_pushf(scratch.arena, &out, TermCursorUp("%d")"\r", (int)(lines.length - 1));
     }
     
     for (Str8_Node *node = lines.first; node != NULL; node = node->next)
     {
-        str8_list_push(scratch.arena, &out, str8("\x1B[2K"));
+        str8_list_push(scratch.arena, &out, str8(TERM_CLEAR_LINE));
         str8_list_push(scratch.arena, &out, node->str);
         if (node->next != NULL)
         {
@@ -120,18 +132,18 @@ internal uint64_t base_main(void)
     log_trace_level_set(log_trace_g, Log_Level_Warn);
     Str8 path = STRUCT_ZERO;
     
-    if (!listen_flags_parse(&path)) return 1;
-    
+    listen_flags_parse(&path);
+     
     if (!fs_file_path_exists(path))
     {
-        fmt_eprintf("%s8 file does not exist at path '%s8'.\n", log_level_string_get(Log_Level_Error), path);
+        listen_eprintfln("file does not exist at path '%s8'.", path);
         return 1;
     }
     
     Str8 ext = str8_skip_last_dot(path);
     if (audio_format_from_string(ext) == Audio_Format_Unknown)
     {
-        fmt_eprintf("%s8 file format '.%s8' is not supported ('%s8').\n", log_level_string_get(Log_Level_Error), ext, path);
+        listen_eprintfln("file format '.%s8' is not supported ('%s8').", ext, path);
         return 1;
     }
     
@@ -139,7 +151,7 @@ internal uint64_t base_main(void)
     Audio_Music music = audio_music_load(path);
     if (!audio_music_is_valid(music))
     {
-        fmt_eprintf("%s8 unable to play audio file '%s8'.\n", log_level_string_get(Log_Level_Error), path);
+        listen_eprintfln("unable to play audio file '%s8'.", path);
         audio_uninit();
         return 1;
     }
@@ -147,7 +159,8 @@ internal uint64_t base_main(void)
     Str8 file_name = str8_skip_last_slash(path);
     bool is_first_frame = true;
     
-    fmt_print(str8("\x1B[?25l")); // hide cursor
+    fmt_printf(TermSetTitle("PLAYING: %s8"), file_name);
+    fmt_print(str8(TERM_CURSOR_HIDE));
     while (audio_music_is_playing(music))
     {
         audio_music_update(music);
@@ -155,7 +168,7 @@ internal uint64_t base_main(void)
         is_first_frame = false;
         os_sleep_ms(50);
     }
-    fmt_print(str8("\n\x1B[?25h")); // restore cursor and add newline
+    fmt_print(str8("\n"TERM_CURSOR_SHOW));
     
     flags_uninit();
     audio_music_stop(music);

@@ -18,10 +18,10 @@
 
 // ak: SPrint =================================================================
 
-internal int fmt_sprintf(char *buf, char const *fmt, ...);
-internal int fmt_snprintf(char *buf, int count, char const *fmt, ...);
-internal int fmt_vsprintf(char * buf, char const * fmt, va_list va);
-internal int fmt_vsnprintf(char *buf, int count, char const *fmt, va_list va);
+internal int fmt_sprintf(char *buf, char const *format, ...);
+internal int fmt_snprintf(char *buf, int count, char const *format, ...);
+internal int fmt_vsprintf(char * buf, char const * format, va_list va);
+internal int fmt_vsnprintf(char *buf, int count, char const *format, va_list va);
 
 // ak: FPrint =================================================================
 
