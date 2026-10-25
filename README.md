@@ -1,21 +1,24 @@
-TODO:
+# MiniApps
 
-- [x] Write all play.c code
-- [x] Add logging
-    - [x] Make custom logging print function
-- [x] add build.c help
-- [x] add version system
-    - user version number like `release-datetime`, `dev-datetime`, `debug-datetime`
-    - https://x.com/TheGingerBill/status/2006120507414905197
-    - https://semver.org/
-    - https://semantic-versioning.org/
-    - https://go.dev/doc/modules/version-numbers
-    - https://github.com/joelparkerhenderson/versioning
-    - https://x.com/TheGingerBill/status/2029216307111936135
-- [ ] fix this: [ERROR] at least 1 argument is required.
-- [x] add option to provide flags in build
-- [ ] Add github release action
-- [ ] Write README.md
-- [x] check spelling
+A collection of small standalone applications that I make. The source code for all programs can be found in the [`src/`](src/) directory.
 
-https://www.youtube.com/watch?v=N409lV1cPy8
+## Releases
+
+Pre-built binaries can be downloaded from the [GitHub Releases](https://github.com/AnzenKodo/miniapps/releases) page.
+
+## Building
+
+Compile the build tool:
+```sh
+clang build.cpp
+```
+For compiling, running, and additional build system options, see the help command:
+```sh
+./a.out --help
+```
+
+## Credits
+
+- [assets/sensacya - got my heart on sale.mp3](https://www.youtube.com/watch?v=N409lV1cPy8)
+
+
