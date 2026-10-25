@@ -696,6 +696,30 @@ internal uint64_t build_run_string(Str8 cmd)
     return exit_code;
 }
 
+internal Str8 build_type_string_from_type(Build_Type type)
+{
+    Str8 result = STRUCT_ZERO;
+    switch (type)
+    {
+        case Build_Type_Dev:
+        {
+            result = str8("dev");
+        }
+        break;
+        case Build_Type_Debug:
+        {
+            result = str8("debug");
+        }
+        break;
+        case Build_Type_Release:
+        {
+            result = str8("release");
+        }
+        break;
+    }
+    return result;
+}
+
 internal Str8 build_path(Build_Info *info)
 {
     Str8_List list = STRUCT_ZERO;
@@ -708,20 +732,9 @@ internal Str8 build_path(Build_Info *info)
         str8_list_pushf(info->arena, &list, BUILD_DIR"/%s8", info->name);
     }
     
-    switch (info->type)
+    if (info->type != Build_Type_Release)
     {
-        case Build_Type_Dev:
-        {
-            str8_list_pushf(info->arena, &list, "_dev");
-        }
-        break;
-        case Build_Type_Debug:
-        {
-            str8_list_pushf(info->arena, &list, "_debug");
-        }
-        break;
-        case Build_Type_Release: {}
-        break;
+        str8_list_pushf(info->arena, &list, "_%s8", build_type_string_from_type(info->type));
     }
     
     if ((info->flags & Build_Flag_Static_Lib) && Context_Os_CURRENT == Context_Os_Linux)
@@ -749,26 +762,7 @@ internal Str8 build_path(Build_Info *info)
 
 internal Str8 build_version_from_type(Build_Type type, Arena *arena)
 {
-    Str8 prefix = STRUCT_ZERO;
-    switch (type)
-    {
-        case Build_Type_Dev:
-        {
-            prefix = str8("Dev");
-        }
-        break;
-        case Build_Type_Debug:
-        {
-            prefix = str8("Debug");
-        }
-        break;
-        case Build_Type_Release:
-        {
-            prefix = str8("Release");
-        }
-        break;
-    }
-    return str8f(arena, "%s8_%s", prefix, BUILD_VERSION);
+    return str8f(arena, "%s8_%s", build_type_string_from_type(type), BUILD_VERSION);
 }
 
 internal void build_log_tracef(Log_Level level, const char *format, ...)
