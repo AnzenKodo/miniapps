@@ -19,6 +19,6 @@ For compiling, running, and additional build system options, see the help comman
 
 ## Credits
 
-- [assets/sensacya - got my heart on sale.mp3](https://www.youtube.com/watch?v=N409lV1cPy8)
+- sensacya - got my heart on sale: https://ncs.io/gotmyheartonsale
 
 
